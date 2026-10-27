@@ -42,6 +42,27 @@ FIIL 耳机的降噪、影院模式、低延迟、多点连接等功能，官方
 
 协议细节见 [docs/PROTOCOL_PC.md](docs/PROTOCOL_PC.md)。
 
+### 后台运行与托盘快捷控制
+
+- 点主窗口右上角 **×** 不会退出，而是**隐藏到 Windows 通知区**，蓝牙连接保持不断。
+- 托盘图标**单击 / 双击**唤回主窗口。
+- **右键**托盘图标弹出完整菜单，可直接切换全部模式，不用先唤回窗口：
+
+  | 菜单段 | 内容 |
+  |---|---|
+  | 窗口 | 显示主窗口 / 隐藏到托盘 / 退出程序 |
+  | 连接 | 连接设备 / 断开连接 / 刷新状态 |
+  | 降噪 | 关闭 / 降噪 / 通透 / 风噪 / 自定义（五档） |
+  | 低延迟 | 关闭 / 开启（游戏）；耳机回报 GAIA 2/3 时额外出现音乐 / 视频 |
+  | 影院模式 | 关 / 开 |
+  | 蓝牙畅连 | 关 / 开 |
+  | 语音提示音量 | 高 / 中 / 低 / 静音 |
+
+- 菜单勾选项与主窗口实时同步；未连接时控制项自动置灰。
+- **只有「退出程序」才真正断开并结束进程**。主窗口顶部也保留了「后台运行」「退出程序」两个按钮。
+- 若托盘不可用（缺 pystray/Pillow，或通知区被系统策略禁用），程序保持普通窗口模式，
+  此时点 × 会提示改用「退出程序」，窗口不会消失到找不回来。
+
 ---
 
 ## 下载安装
@@ -75,7 +96,7 @@ pip install pyinstaller
 powershell -ExecutionPolicy Bypass -File build\build.ps1
 ```
 
-产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.0.0.exe`（安装包）。
+产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.1.0.exe`（安装包）。
 
 ---
 
@@ -123,6 +144,9 @@ fiil-pods-pc/
 ├── app.py                  # tkinter GUI 主程序（入口）
 ├── ble_worker.py           # BLE 异步工作线程 + 事件队列
 ├── fiil_protocol.py        # 协议层：组帧、解析、枚举
+├── quick_controls.py       # 托盘与主窗口共用的控制目录 / 菜单模型
+├── tray_support.py         # 系统托盘后端（pystray + Pillow，延迟导入）
+├── window_lifecycle.py     # 主线程调度与窗口显示/隐藏/退出状态机
 ├── tests/                  # 离线测试，不需要耳机
 ├── tools/                  # 探针 / 实验 / 真机验证脚本
 ├── docs/
@@ -144,9 +168,9 @@ fiil-pods-pc/
 ## 开发与测试
 
 ```bash
-# 离线测试（不需要耳机）
+# 离线测试（不需要耳机、不需要桌面）
 pytest tests -q
-# 5 passed
+# 31 passed
 
 # 单独跑某个测试（也是自检脚本）
 python -X utf8 tests/test_protocol.py
@@ -155,8 +179,9 @@ python -X utf8 tests/test_protocol.py
 ruff check .
 ```
 
-`tests/` 下的 5 个文件共 **140 项断言**，覆盖组帧、流式重组、电量解析、
-设备名回退匹配、ACK 判定、多点连接状态机。
+`tests/` 下共 **31 个测试**，覆盖组帧、流式重组、电量解析、设备名回退匹配、
+ACK 判定、多点连接状态机，以及托盘部分的控制目录、菜单模型、跨线程调度、
+窗口生命周期与"图标线程崩溃"的兜底逻辑。
 
 `tools/` 下是需要真机的探针与实验脚本，会实际连接耳机，**运行前请先读脚本开头的说明**。
 

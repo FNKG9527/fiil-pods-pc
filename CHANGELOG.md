@@ -5,6 +5,56 @@
 
 ---
 
+## [1.1.0] - 2026-10-27
+
+系统托盘后台运行，右键即可唤回窗口并快捷切换全部模式。
+
+### 新增
+
+**后台运行与托盘**
+
+- 主窗口新增「后台运行」「退出程序」两个按钮
+- 点窗口关闭按钮（×）不再退出程序，改为隐藏到 Windows 通知区，BLE 连接保持不断
+- 托盘图标双击/单击（默认项「显示主窗口」）唤回窗口，右键弹出完整菜单
+- 托盘菜单分七段：窗口控制 / 连接控制 / 降噪模式 MAF / 低延迟 / 影院模式 / 蓝牙畅连 / 语音提示音量，段间有分隔线
+- 托盘菜单与主窗口实时联动：状态变化后菜单勾选项随之更新
+- 未连接时托盘控制项自动置灰，不会弹出主窗口的警告框
+- 只有「退出程序」才真正断开连接并结束进程
+
+**新增模块**
+
+- `quick_controls.py` — 托盘与主窗口共用的控制目录与只读菜单模型
+  - `ControlState` / `ControlGroup` / `ControlOption` / `CONTROL_GROUPS` / `menu_model()`
+  - 选项文案直接取协议枚举的 `label_cn`，主窗口与托盘不会文案漂移
+- `tray_support.py` — 托盘后端（延迟导入 pystray / Pillow）
+  - 依赖缺失时返回可读错误，程序降级为普通窗口模式而不是崩溃
+  - `TrayIcon.start()` 轮询图标线程就绪状态，避免把"图标线程已崩溃"误判成可用
+  - 容忍 `ChangeWindowMessageFilterEx` 被拒：部分 Windows 环境（受限令牌、沙箱、企业策略）
+    该调用必然失败，而它只影响 Explorer 重启后图标能否自动恢复，不应让托盘启动失败
+- `window_lifecycle.py` — 主线程调度与窗口生命周期
+  - `MainThreadDispatcher` — pystray 回调线程里的动作排队回 Tk 主线程执行
+  - `WindowLifecycle` — `show` / `hide` / `toggle` / `exit`，`exit` 幂等
+  - 托盘不可用时 `hide()` 返回 False，窗口不会消失到用户找不到
+
+**打包**
+
+- `build/fiil_pods.spec` — 收集 `pystray` / `PIL`，不再把 `PIL` 排除
+
+### 变更
+
+- `app.py` — 窗口关闭按钮绑定改为隐藏到托盘；新增 `_control_snapshot()` / `run_tray_control()`
+  / `show_window()` / `hide_to_tray()` / `request_exit()`
+- `requirements.txt` — 新增 `pystray>=0.19,<1`、`pillow>=10,<13`
+- 主窗口 MAF / 低延迟 / 提示音量的档位文案改为从 `quick_controls.CONTROL_GROUPS` 读取
+
+### 已知限制
+
+- 托盘不可用（缺 pystray/Pillow，或通知区被策略禁用）时保持普通窗口模式，
+  此时点 × 会提示改用「退出程序」
+- 托盘图标本身不显示连接状态颜色，连接状态以菜单项与主窗口为准
+
+---
+
 ## [1.0.0] - 2026-10-27
 
 首个公开版本。
@@ -78,4 +128,5 @@ FIIL+ 3.5.2（`com.fengeek.f002`），jadx 静态分析 + 实机 BLE 抓包。
 
 ---
 
+[1.1.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.1.0
 [1.0.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.0.0
