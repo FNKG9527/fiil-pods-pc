@@ -1,0 +1,59 @@
+# NOTICE
+
+## 商标归属
+
+**FIIL**、**FIIL+**、**Key Max**、**Atom**、**CC Pro2**、**CC Nano**、**T1** 等名称与标识是
+**斐耳科技（FIIL）** 及其关联方的商标或注册商标。
+
+本仓库在**指称性合理使用**（nominative fair use）范围内提及这些名称，
+唯一目的是说明本协议适用的设备型号。
+
+这种提及不表示、也不应被理解为斐耳科技对本仓库的赞助、认可、认证或任何形式的关联。
+
+---
+
+## 内容来源
+
+本仓库**不包含**：
+
+- 官方 APK 文件（`fiil.apk`）
+- 反编译产物（`jadx_out/`、`apktool_out/`）
+- 任何厂商源代码、资源文件、图片或字体
+- 任何厂商签发的凭证或密钥
+
+本仓库包含的是：**独立编写的协议描述文档**，以及**基于该描述重新实现的通信工具**。
+文档中的 `文件:行号` 引用是**指称**，指向读者自行反编译后应能找到的位置，不附带被引用内容。
+
+`docs/evidence/` 下的抓包日志全部由作者在自己的设备上采集，
+并已按 [docs/evidence/README.md](docs/evidence/README.md) 的规则脱敏（蓝牙地址替换为占位值）。
+
+---
+
+## 第三方组件
+
+| 组件 | 许可 | 用途 |
+|---|---|---|
+| [bleak](https://github.com/hbldh/bleak) | MIT | 跨平台 BLE 客户端（运行时依赖，未内嵌） |
+| [PyInstaller](https://pyinstaller.org/) | GPL-2.0 + 启动器例外 | 打包为 exe（仅构建时使用） |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) | Inno Setup License（允许自由分发） | 生成安装程序（仅构建时使用） |
+| [Pillow](https://python-pillow.org/) | HPND | 生成图标（仅构建时使用） |
+| [jadx](https://github.com/skylot/jadx) | Apache-2.0 | 反编译（用户自行安装，未内嵌） |
+| [uiautomation](https://github.com/yinkaisheng/Python-UIAutomation-for-Windows) | Apache-2.0 | 打包后的 UI 冒烟测试（仅开发时使用） |
+
+GNU General Public License v3.0 全文见 [LICENSE](LICENSE)。
+
+---
+
+## 文档许可
+
+`docs/` 与 `README.md` 中的文字内容以
+**Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)** 发布。
+
+代码（`app.py`、`ble_worker.py`、`fiil_protocol.py`、`tests/`、`tools/`、`build/`）
+以 **GPL-3.0** 发布。
+
+---
+
+## 免责
+
+详见 [DISCLAIMER.md](DISCLAIMER.md)。

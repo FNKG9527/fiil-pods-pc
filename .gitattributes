@@ -1,0 +1,19 @@
+# 统一换行符，避免 Windows / Linux 之间的 diff 噪声
+* text=auto eol=lf
+
+# 明确按二进制处理
+*.exe binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+
+# 抓包日志按文本处理，保留原始换行
+*.log text eol=lf
+docs/evidence/*.txt text eol=lf
+docs/evidence/*.json text eol=lf
+
+# Inno Setup 脚本用 CRLF 更稳
+*.iss text eol=crlf
+*.ps1 text eol=crlf

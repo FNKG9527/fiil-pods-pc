@@ -1,0 +1,67 @@
+name: Bug 报告
+description: 程序行为不对、崩溃、界面问题
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认你用的是[最新版本](https://github.com/FNKG9527/fiil-pods-pc/releases/latest)。
+
+        **不要在 issue 里粘贴真实蓝牙地址或含个人信息的日志**，请先脱敏。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 实际行为是什么？期望行为是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 启动程序
+        2. 点「扫描设备」
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: headset
+    attributes:
+      label: 耳机型号与固件版本
+      placeholder: "FIIL Key Max / 3.0.1.1（程序里点「读版本」可看）"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 程序版本
+      placeholder: "安装包版本，或 git commit"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: run-mode
+    attributes:
+      label: 运行方式
+      options:
+        - 安装包（Setup.exe）
+        - 从源码 python app.py
+        - 自己打包的 exe
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: |
+        右侧「收发日志」页签的内容，或 `out/` 下的日志文件。
+        **请先把蓝牙地址替换成 `B0:F1:A3:00:00:01` 这类占位值。**
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-10-25T00:16:09",
+  "address": "B0:F1:A3:00:00:01",
+  "mtu": 512,
+  "services": [
+    {
+      "uuid": "0000fdb3-0000-1000-8000-00805f9b34fb",
+      "description": "Vendor specific",
+      "characteristics": [
+        {
+          "uuid": "0000ff18-0000-1000-8000-00805f9b34fb",
+          "handle": 2,
+          "properties": [
+            "notify",
+            "read"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 4,
+              "description": "Client Characteristic Configuration"
+            }
+          ],
+          "read_value_hex": ""
+        },
+        {
+          "uuid": "0000ff16-0000-1000-8000-00805f9b34fb",
+          "handle": 5,
+          "properties": [
+            "write",
+            "read"
+          ],
+          "descriptors": [],
+          "read_value_hex": ""
+        },
+        {
+          "uuid": "0000ff17-0000-1000-8000-00805f9b34fb",
+          "handle": 7,
+          "properties": [
+            "write-without-response",
+            "write"
+          ],
+          "descriptors": []
+        }
+      ]
+    }
+  ]
+}

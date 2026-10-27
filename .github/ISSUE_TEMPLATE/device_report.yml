@@ -1,0 +1,62 @@
+name: 新机型实测数据
+description: 在别的 FIIL 型号上验证了本项目的协议
+labels: ["device-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这是本仓库最有价值的贡献类型。请尽量填全，缺项的结论不会被合并进协议文档。
+
+  - type: input
+    id: model
+    attributes:
+      label: 耳机型号
+      placeholder: "FIIL CC Pro2"
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: 固件版本
+      description: 程序里点「读版本」（GET cmdId=2）可看
+      placeholder: "3.0.1.1"
+    validations:
+      required: true
+
+  - type: input
+    id: mac-prefix
+    attributes:
+      label: 蓝牙地址前 3 段（OUI）
+      description: 只填 OUI，例如 `B0:F1:A3`。**不要填完整地址。**
+      placeholder: "B0:F1:A3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: results
+    attributes:
+      label: 各项功能实测结果
+      description: |
+        逐项写「可用 / 不可用 / 行为不同」，行为不同的请描述现象。
+      value: |
+        - 电量：
+        - 降噪 MAF 五档：
+        - 影院模式（空间音频）：
+        - 低延迟档位（哪些档位被接受）：
+        - 蓝牙畅连：
+        - 语音提示音量：
+        - EQ 写入：
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 证据
+      description: |
+        原始抓包日志（脱敏后）或关键帧的十六进制。
+        日志需含型号、固件版本、采集时间、采集方式。
+      render: text
+    validations:
+      required: true

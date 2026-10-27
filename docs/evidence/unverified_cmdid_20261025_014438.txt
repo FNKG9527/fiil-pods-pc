@@ -1,0 +1,41 @@
+==============================================================================
+# 未确认 cmdId 补测  2026-10-25T01:44:11
+==============================================================================
+[*] 扫描中…
+[+] 目标 B0:F1:A3:00:00:01  None
+[+] 已连接，MTU=512
+[TX] setUnlock                00 27 01 00 04 FF 02 02 34
+     [RX] 00 27 02 00 03 FF 01 FF                      RESP cid=39 cmd=255 len=1
+[TX] getChangLanStatus      01 27 01 00 02 80 00    (c.java:27)
+     [RX] 01 27 02 00 03 80 01 01                      RESP cid=39 cmd=128 len=1
+[TX] getCodecStatus         02 27 01 00 02 90 00    (c.java:43 (NetError -112))
+     [RX] 02 27 02 00 03 90 01 02                      RESP cid=39 cmd=144 len=1
+[TX] getEQStatus            03 27 01 00 02 04 00    (c.java:59)
+     [RX] 03 27 02 00 0E 04 0C 0A 0E 08 06 04 02 00 01 FA FC FE 02 RESP cid=39 cmd=4 len=12
+[TX] getElectricity         04 27 01 00 02 01 00    (c.java:75)
+     [RX] 04 27 02 00 05 01 03 00 4D 00                RESP cid=39 cmd=1 len=3
+[TX] getKey                 05 27 01 00 02 05 00    (c.java:91)
+     [RX] 05 27 02 00 20 05 1E 01 01 07 02 01 07 03 01 00 04 01 00 05 01 00 06 01 00 07 01 00 08 01 00 09 01 00 0A 01 00 RESP cid=39 cmd=5 len=30
+[TX] getLdacSwitchStatus    06 27 01 00 02 8F 00    (c.java:107 (NetError -113))
+     [RX] 06 27 02 00 03 8F 01 00                      RESP cid=39 cmd=143 len=1
+[TX] getLdacUnlockStatus    07 27 01 00 02 8E 00    (c.java:123 (NetError -114))
+     [RX] 07 27 02 00 03 8E 01 01                      RESP cid=39 cmd=142 len=1
+[TX] getLeftHeadsetUUID     08 27 01 00 02 8A 00    (c.java:139 (NetError -118))
+     [RX] 08 27 02 00 12 8A 10 42 50 32 36 32 30 35 12 00 3B 51 45 06 20 BB 78 RESP cid=39 cmd=138 len=16
+[TX] getLowDelayStatus      09 27 01 00 02 08 00    (c.java:155)
+     [RX] 09 27 02 00 03 08 01 00                      RESP cid=39 cmd=8 len=1
+[TX] getMAFStatus           0A 27 01 00 02 0C 00    (c.java:171)
+     [RX] 0A 27 02 00 03 0C 01 01                      RESP cid=39 cmd=12 len=1
+[TX] getMusicStatus         0B 27 01 00 02 07 00    (c.java:187)
+     [RX] 0B 27 02 00 03 07 01 00                      RESP cid=39 cmd=7 len=1
+[TX] getPID                 0C 27 01 00 02 84 00    (c.java:203)
+     [RX] 0C 27 02 00 05 84 03 00 2E 01                RESP cid=39 cmd=132 len=3
+[TX] getRightHeadsetUUID    0D 27 01 00 02 8B 00    (c.java:219 (NetError -117))
+     [RX] 0D 27 02 00 12 8B 10 42 50 32 36 32 30 35 12 00 3B 51 45 06 20 BB 78 RESP cid=39 cmd=139 len=16
+[TX] getSpatialAudioStatus  0E 27 01 00 02 18 00    (c.java:235)
+     [RX] 0E 27 02 00 03 18 01 00                      RESP cid=39 cmd=24 len=1
+[TX] getToneStatus          0F 27 01 00 02 82 00    (c.java:251 (NetError -126))
+     [RX] 0F 27 02 00 03 82 01 02                      RESP cid=39 cmd=130 len=1
+[TX] getVersion             00 27 01 00 02 02 00    (c.java:267)
+     [RX] 00 27 02 00 06 02 04 03 00 01 01             RESP cid=39 cmd=2 len=4
+[+] 已断开

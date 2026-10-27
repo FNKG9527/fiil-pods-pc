@@ -1,0 +1,7 @@
+# 运行时依赖（GUI 与 BLE 通信）
+bleak>=0.22,<4
+
+# 可选：仅 tools/ 下的截图与 OCR 辅助脚本需要
+# pillow>=10
+# pywin32>=306
+# uiautomation>=2.0

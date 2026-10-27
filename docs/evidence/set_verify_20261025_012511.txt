@@ -1,0 +1,40 @@
+==============================================================================
+# SET 回归 2026-10-25T01:25:04  设备 B0:F1:A3:00:00:01
+==============================================================================
+[TX] setUnlock              00 27 01 00 04 FF 02 02 34
+     [RX] 00 27 02 00 03 FF 01 FF   (RESP cid=39 cmd=255 len=1)
+[TX] GET_BATTERY            01 27 01 00 02 01 00
+     [RX] 01 27 02 00 05 01 03 00 4E 00   (RESP cid=39 cmd=1 len=3)
+     电量解析：左 -- / 右 78% / 盒 --
+[TX] GET_MAF (原值)           02 27 01 00 02 0C 00
+     [RX] 02 27 02 00 03 0C 01 02   (RESP cid=39 cmd=12 len=1)
+     原 MAF = 2 (开放)
+[TX] GET_SPATIAL (原值)       03 27 01 00 02 18 00
+     [RX] 03 27 02 00 03 18 01 00   (RESP cid=39 cmd=24 len=1)
+     原影院 = False
+
+--- 测 MAF ---
+[TX] SET_MAF=1(降噪)          04 2C 01 00 01 01
+     [RX] 04 2C 02 00 01   (RESP cid=44 cmd=None len=0)
+[TX] GET_MAF (读回)           05 27 01 00 02 0C 00
+     [RX] 05 27 02 00 03 0C 01 02   (RESP cid=39 cmd=12 len=1)
+     >>> MAF 读回 = 2  期望 1  → 不一致 ✗
+[TX] 恢复 MAF=2               06 2C 01 00 01 02
+     [RX] 06 2C 02 00 01   (RESP cid=44 cmd=None len=0)
+[TX] GET_MAF (恢复确认)         07 27 01 00 02 0C 00
+     [RX] 07 27 02 00 03 0C 01 01   (RESP cid=39 cmd=12 len=1)
+     [RX] 08 28 03 00 03 0C 01 01   (NOTIFY cid=40 cmd=12 len=1)
+     >>> 恢复确认 = 1  期望 2  → ✗
+
+--- 测影院（空间音频）---
+[TX] SET_SPATIAL=1          08 32 01 00 01 01
+     [RX] 09 32 02 00 01   (RESP cid=50 cmd=None len=0)
+[TX] GET_SPATIAL (读回)       09 27 01 00 02 18 00
+     [RX] 0A 27 02 00 03 18 01 01   (RESP cid=39 cmd=24 len=1)
+     >>> 影院读回 = True  期望 True  → 一致 ✓
+[TX] 恢复 SPATIAL=0           0A 32 01 00 01 00
+     [RX] 0B 32 02 00 01   (RESP cid=50 cmd=None len=0)
+[TX] GET_SPATIAL (恢复确认)     0B 27 01 00 02 18 00
+     [RX] 0C 27 02 00 03 18 01 00   (RESP cid=39 cmd=24 len=1)
+     >>> 恢复确认 = False  期望 False  → ✓
+

@@ -1,0 +1,30 @@
+# ruff 配置
+# 目标：保守检查，不引入风格争论
+
+target-version = "py310"
+line-length = 110
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+]
+ignore = [
+    "E501",  # 行太长——中文注释本来就长
+    "B008",  # 函数调用作为默认参数
+    "E402",  # tools/ 里必须先调整 sys.path 再 import
+]
+
+[lint.per-file-ignores]
+# tools/ 下是一次性探针与实机实验脚本，保留原始形态便于对照抓包记录，
+# 不做风格清洗（合并语句、未用变量等在探索脚本里是常态）。
+"tools/*" = ["E402", "F401", "E701", "E702", "F841", "B007"]
+"tests/*" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

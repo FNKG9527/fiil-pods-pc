@@ -1,0 +1,5 @@
+# FIIL BLE 会话日志  2026-10-25T00:19:32
+# t=相对秒  dir=RX(耳机->PC)/TX(PC->耳机)  char=特征值  hex=原始字节
+   3.262  TX  ff17         00 27 01 00 04 FF 02 02 34                  9B  probe
+   3.314  RX  notify       00 27 02 00 03 FF 01 FF                     8B  
+

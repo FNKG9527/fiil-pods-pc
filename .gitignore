@@ -1,0 +1,44 @@
+# 构建与运行时产物（发布走 GitHub Releases，不进版本库）
+dist/
+build/*.spec.bak
+build/fiil_pods/
+build/known_devices.json
+*.spec.bak
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 本机实测日志与截图（发布前脱敏，只提交 docs/evidence/ 下已脱敏的部分）
+out/
+*.log
+*.png
+*.jpg
+*.jpeg
+!build/app.ico
+
+# 已知设备表含真实蓝牙地址，绝不提交
+known_devices.json
+!known_devices.example.json
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# 环境
+.env
+venv/
+.venv/
+env/
+
+# 安装包 / 可执行文件
+*.exe
+*.msi
+*.msix
