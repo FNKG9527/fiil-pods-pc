@@ -16,6 +16,9 @@ hiddenimports = []
 # WinRT 是命名空间包，PyInstaller 静态分析看不到 bleak 运行时动态 import 的模块
 for pkg in ("winrt", "bleak"):
     hiddenimports += collect_submodules(pkg)
+# 托盘是延迟导入的：静态分析看不到，必须显式收集，否则缺图标时 exe 里托盘直接不可用
+for pkg in ("pystray", "PIL"):
+    hiddenimports += collect_submodules(pkg)
 
 # 设备表：仓库里只有脱敏样例（known_devices.json 本身在 .gitignore 里，
 # 含本机真实地址）。打包时用样例顶替，安装版首次运行时由
@@ -37,7 +40,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["numpy", "PIL", "pytest", "unittest", "pydoc_data", "test"],
+    # 注意：不能排除 PIL——托盘的 Pillow 依赖是延迟导入，排除后 exe 里托盘会静默失效
+    excludes=["numpy", "pytest", "unittest", "pydoc_data", "test"],
     noarchive=False,
     optimize=0,
 )

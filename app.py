@@ -15,6 +15,7 @@ import csv
 import os
 import queue
 import sys
+import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,9 @@ from typing import Any
 
 from ble_worker import BleWorker, Command, Event
 from fiil_protocol import MafMode
+from quick_controls import ControlState, menu_model
+from tray_support import TrayIcon, build_menu_items, load_tray_backend
+from window_lifecycle import MainThreadDispatcher, WindowLifecycle
 
 APP_TITLE = "FiilPods PC 探针 — FIIL 耳机 BLE 逆向控制台"
 
@@ -63,9 +67,33 @@ class App:
         self.mp_expect: bool | None = None
         self.tone_expect: int | None = None
 
+        # 托盘菜单用的最后已知状态（None = 还没读到，不要编造默认值）
+        self.maf_value: int | None = None
+        self.ll_value: int | None = None
+        self.cinema_value: bool | None = None
+        self.mp_value: bool | None = None
+        self.tone_value: int | None = None
+
+        # 托盘与主线程调度：pystray 在自己的线程跑，所有 Tk 动作都排回主线程
+        self._dispatch_q: queue.Queue = queue.Queue()
+        self._dispatcher = MainThreadDispatcher(
+            self._dispatch_q, threading.get_ident(),
+            lambda exc: self._append("err", "", f"!! 托盘回调异常：{exc!r}"),
+        )
+        backend = load_tray_backend()
+        self.tray = TrayIcon(backend, APP_TITLE, self._on_tray_action)
+
         self._build_ui()
         self._prefill_last_addr()
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.lifecycle = WindowLifecycle(root, self.tray, self.worker)
+        self._install_window_callbacks()
+
+        # 托盘必须等界面建好后再启动：不可用时要往日志区写原因
+        if backend.available and not self.tray.start(self._tray_items()):
+            self._append("sys", "", "[托盘] 初始化失败，程序保持普通窗口模式。")
+        elif not backend.available:
+            self._append("sys", "", f"[托盘] 不可用：{backend.error}")
+
         self.root.after(60, self._pump)
 
     def _prefill_last_addr(self) -> None:
@@ -104,6 +132,11 @@ class App:
         self.btn_conn = ttk.Button(row, text="连接", command=self._on_connect, width=10)
         self.btn_conn.pack(side=tk.LEFT)
         ttk.Button(row, text="断开", command=self._on_disconnect, width=10).pack(side=tk.LEFT, padx=4)
+        # 后台运行与真正退出：托盘不可用时也不能把用户困在「只能隐藏」的状态
+        ttk.Button(row, text="后台运行", command=self.hide_to_tray,
+                   width=10).pack(side=tk.LEFT, padx=(12, 2))
+        ttk.Button(row, text="退出程序", command=self.request_exit,
+                   width=10).pack(side=tk.LEFT, padx=2)
 
         self.lbl_state = ttk.Label(row, text="未连接", foreground="#c0392b")
         self.lbl_state.pack(side=tk.LEFT, padx=12)
@@ -373,13 +406,107 @@ class App:
 
     # -------------------------------------------------------------- 事件泵
     def _pump(self) -> None:
+        self._dispatcher.pump()
         try:
             while True:
                 evt = self.evt_q.get_nowait()
                 self._handle_event(evt)
+                if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint", "tone"):
+                    self._refresh_tray_menu()
         except queue.Empty:
             pass
         self.root.after(60, self._pump)
+
+    # -------------------------------------------------------------- 托盘协调
+    def _control_snapshot(self) -> ControlState:
+        return ControlState(
+            connected=self.connected,
+            maf=self.maf_value,
+            low_latency=self.ll_value,
+            cinema=self.cinema_value,
+            multipoint=self.mp_value,
+            tone=self.tone_value,
+        )
+
+    def _tray_items(self) -> list:
+        return build_menu_items(
+            menu_model(self._control_snapshot()),
+            window_visible=not self.lifecycle.hidden,
+        )
+
+    def _refresh_tray_menu(self) -> None:
+        if getattr(self.tray, "available", False):
+            self.tray.update(self._tray_items())
+
+    def _on_tray_action(self, item) -> None:
+        """pystray 线程的回调入口：只投递，不碰 Tk。"""
+        self._dispatcher.submit(lambda: self._apply_tray_action(item))
+
+    def _apply_tray_action(self, item) -> None:
+        action = item.action
+        if action == "show":
+            self.show_window()
+        elif action == "hide":
+            self.hide_to_tray()
+        elif action == "exit":
+            self.request_exit()
+        elif action == "connect":
+            self.show_window()
+            self._on_connect_addr()
+        elif action == "disconnect":
+            self._on_disconnect()
+        elif action == "refresh":
+            self._on_refresh_all()
+        elif action.startswith("set:"):
+            self.run_tray_control(action.split(":", 1)[1], item.value)
+
+    def run_tray_control(self, action: str, value: Any) -> None:
+        """复用主窗口的既有动作，不另造协议帧；未连接时静默忽略而不是弹窗。"""
+        if not self.connected:
+            self.status.set("未连接：快捷切换需要先连接耳机。")
+            return
+        if action == "maf":
+            self._on_set_maf(MafMode(int(value)))
+        elif action == "low_latency":
+            self._on_set_low_latency(int(value))
+        elif action == "cinema":
+            self.cinema_on.set(bool(value))
+            self._on_set_cinema()
+        elif action == "multipoint":
+            self.mp_on.set(bool(value))
+            self._on_set_multipoint()
+        elif action == "tone":
+            self._on_set_tone(int(value))
+
+    # -------------------------------------------------------------- 窗口
+    def _install_window_callbacks(self) -> None:
+        self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+
+    def show_window(self) -> None:
+        if self.lifecycle.exiting:
+            return
+        self.lifecycle.show()
+        self._refresh_tray_menu()
+
+    def hide_to_tray(self) -> None:
+        if self.lifecycle.hide():
+            self._refresh_tray_menu()
+            return
+        if self.lifecycle.exiting:
+            return
+        # 没有托盘时绝不假装已进后台：保持窗口并说明退出方式
+        messagebox.showinfo(
+            "系统托盘不可用",
+            "当前环境无法创建托盘图标，窗口已保持显示。\n"
+            "如需关闭程序，请点主窗口的「退出程序」。",
+        )
+
+    def request_exit(self) -> None:
+        try:
+            self._dispatcher.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self.lifecycle.exit()
 
     def _handle_event(self, e: Event) -> None:
         if e.kind == "log":
@@ -469,6 +596,7 @@ class App:
             payload = e.payload or {}
             val = payload.get("value")
             label = payload.get("label", e.text)
+            self.maf_value = val
             self.maf_var.set(f"{label} ({val})" if val is not None else str(label))
             self._parse_line(e.text)
             # 写后校验：把读回值与会话里记下的「期望值」比对
@@ -481,6 +609,7 @@ class App:
                 self.maf_expect = None
         elif e.kind == "cinema":
             on = bool((e.payload or {}).get("on"))
+            self.cinema_value = on
             self.cinema_on.set(on)
             self.cinema_state.set("开" if on else "关")
             self._parse_line(e.text)
@@ -495,6 +624,7 @@ class App:
             payload = e.payload or {}
             val = payload.get("value")
             label = payload.get("label", e.text)
+            self.ll_value = val
             self.ll_var.set(f"{label}" if val is not None else "--")
             self._parse_line(e.text)
             self._ensure_ll_buttons(val)
@@ -505,6 +635,7 @@ class App:
                 self.ll_expect = None
         elif e.kind == "multipoint":
             on = bool((e.payload or {}).get("on"))
+            self.mp_value = on
             self.mp_on.set(on)
             self.mp_state.set("开" if on else "关")
             self._parse_line(e.text)
@@ -517,6 +648,7 @@ class App:
             payload = e.payload or {}
             val = payload.get("value")
             label = payload.get("label", e.text)
+            self.tone_value = val
             self.tone_var.set(str(label))
             self._parse_line(e.text)
             if self.tone_expect is not None:
@@ -771,14 +903,6 @@ class App:
         self.txt.delete("1.0", tk.END)
         self.txt_parse.delete("1.0", tk.END)
         self.rows.clear()
-
-    # ------------------------------------------------------------- 关闭
-    def _on_close(self) -> None:
-        try:
-            self.worker.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
-        self.root.destroy()
 
 
 def main() -> None:
