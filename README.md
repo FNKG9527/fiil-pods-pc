@@ -166,11 +166,16 @@ ruff check .
 
 | 平台 | 状态 |
 |---|---|
-| Windows 10 / 11 | ✅ 支持（WinRT 蓝牙后端） |
+| Windows 10 / 11 | ✅ 支持（WinRT 蓝牙后端，唯一实机验证过的平台） |
 | Linux | ⚠️ 理论可用（bleak 支持 BlueZ），未测试 |
 | macOS | ⚠️ 理论可用（bleak 支持 CoreBluetooth），未测试 |
 
-GUI 用 tkinter，三者都能跑；但本项目只在 Windows 上做过实机验证。
+GUI 用 tkinter，三者都能跑。但有几处只在 Windows 上生效的路径，其他平台会静默跳过：
+
+- `app.py:789` 的 `ctypes.windll.shcore.SetProcessDpiAwareness(1)` 包在 `try/except` 里
+- `ble_worker.py:157` 用 `Get-PnpDevice` 查已配对设备名，失败时回退到广播名，不影响扫描
+
+也就是说非 Windows 上**核心 BLE 功能可以跑，但已配对设备名兜底和高分屏 DPI 适配没有**。
 
 ---
 
