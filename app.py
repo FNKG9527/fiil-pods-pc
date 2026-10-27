@@ -90,7 +90,7 @@ class App:
 
         # 托盘必须等界面建好后再启动：不可用时要往日志区写原因
         if backend.available and not self.tray.start(self._tray_items()):
-            self._append("sys", "", "[托盘] 初始化失败，程序保持普通窗口模式。")
+            self._append("sys", "", f"[托盘] 初始化失败：{self.tray.error or '原因未知'}；程序保持普通窗口模式。")
         elif not backend.available:
             self._append("sys", "", f"[托盘] 不可用：{backend.error}")
 
