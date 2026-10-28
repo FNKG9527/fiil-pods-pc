@@ -27,7 +27,7 @@ def test_tone_color_maps_off_to_muted_and_unknown_to_text():
 
 
 def test_log_tags_all_resolve():
-    for tag, name in t.LOG_TAG_COLORS.items():
+    for name in t.LOG_TAG_COLORS.values():
         assert t.color(name)
 
 
