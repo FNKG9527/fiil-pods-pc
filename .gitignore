@@ -24,6 +24,10 @@ out/
 known_devices.json
 !known_devices.example.json
 
+# 用户本地设置与窗口尺寸（运行时生成，每台机器不同）
+settings.json
+window.json
+
 # 编辑器
 .vscode/
 .idea/
