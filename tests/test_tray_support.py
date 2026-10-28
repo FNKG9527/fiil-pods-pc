@@ -62,8 +62,8 @@ def test_menu_sections_are_separated():
     items = build_menu_items(groups)
 
     separators = [i for i, item in enumerate(items) if item.action == "separator"]
-    # 连接操作前 1 条 + 五个控制组各 1 条
-    assert len(separators) == 6
+    # 连接操作前 1 条 + 六个控制组各 1 条
+    assert len(separators) == 7
 
     def section_of(index: int) -> int:
         return sum(1 for s in separators if s < index)

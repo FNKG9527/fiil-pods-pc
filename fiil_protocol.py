@@ -565,6 +565,31 @@ class FiilProtocol:
         """
         return self._get(Query.TONE)
 
+    def request_ldac_switch(self) -> bytes:
+        """GET_LDAC_SWITCH(143=0x8F)。帧 `xx 27 01 00 02 8F 00`。回包 payload[0]=0/1。
+
+        特征值：ff17（写）→ ff18（通知）
+        验证状态：CONFIRMED（实机回包 `06 27 02 00 03 8F 01 00` → 开关=关）
+        来源：com.fengeek.main.i.d.c:107 getLdacSwitchStatus —
+              setCommandClassifyId(39), setCommandId(NetError.ERR_SSL_... -113)
+              其中 -113 & 0xFF = **0x8F = 143**
+        """
+        return self._get(Query.LDAC_SWITCH)
+
+    def request_ldac_unlock(self) -> bytes:
+        """GET_LDAC_UNLOCK(142=0x8E)。帧 `xx 27 01 00 02 8E 00`。回包 payload[0]=0/1。
+
+        0 = 未激活（App 里显示「激活」按钮），1 = 已激活（显示开关）。
+        注意「激活」本身走的是**网络请求**（FIIL 服务器下发 activateCode，
+        见 F046HomeFragment.h / F046UnlockLDACActivity），不是 BLE 指令，
+        PC 端无法离线完成 —— 本程序只读取激活状态并据此启用/禁用开关。
+
+        特征值：ff17（写）→ ff18（通知）
+        验证状态：CONFIRMED（实机回包 `07 27 02 00 03 8E 01 01` → 已激活）
+        来源：com.fengeek.main.i.d.c:123 getLdacUnlockStatus
+        """
+        return self._get(Query.LDAC_UNLOCK)
+
     def request_eq(self) -> bytes:
         """GET_EQ(4)。帧 `xx 27 01 00 02 04 00`。
         回包 payload=12 字节曲线（实测 `0A 0E 08 06 04 02 00 01 FA FC FE 02`，-6..+14 的有符号值）。
@@ -632,9 +657,30 @@ class FiilProtocol:
         v = int(volume) & 0xFF
         return build_frame(int(Cid.SET_PARAM), 3, bytes([v]), self._next_seq())
 
+    def set_ldac_switch(self, on: bool) -> bytes:
+        """LDAC 高清解码开关。
+
+        特征值：ff17
+        发送字节：`xx 01 01 00 03 0D 01 <0/1>`（cid=1 = SET_PARAM，cmdId=13，payload 1 字节）
+        预期回包：`xx 01 02 00 03 0D 01 00`（末字节 00 = 成功）
+        读回确认：request_ldac_switch() → payload[0] == 1/0
+
+        验证状态：PARTIAL —— 帧字节来自逆向（setCommandClassifyId(1),
+        setCommandId(13)），与已实测的 SET_TONE(cmdId=3)、SET_MULTIPOINT(cmdId=1)
+        走同一个 cid=1 族，帧结构一致；但 LDAC 开关这一条**尚未在本机实机抓包确认**，
+        因此界面必须显示 ACK 与读回结果，不能像 CONFIRMED 项那样直接假定成功。
+
+        ⚠️ 打开 LDAC 会切到高码率：官方 App 在开启前先 `setLowDelay(false)`，
+        因为低延迟与 LDAC 互斥。这里照抄该顺序（先关低延迟再开 LDAC）。
+        切换后耳机可能重连（官方文案：「耳机可能会重连」）。
+
+        来源：com.fengeek.main.i.d.c:371-386 setLdacSwitch；
+              bluetrum F39AppSettingRequest.SETTING_TYPE_LDAC = 13
+        """
+        return build_frame(int(Cid.SET_PARAM), 13, bytes([1 if on else 0]), self._next_seq())
+
     def set_multipoint(self, on: bool) -> bytes:
         """蓝牙畅连（多点）开关。
-
         特征值：ff17
         发送字节：`xx 01 01 00 03 01 01 <0/1>`（cid=1 = SET_PARAM，cmdId=1，payload 只有 1 字节）
         预期回包：`xx 01 02 00 03 01 01 00`

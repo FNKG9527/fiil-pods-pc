@@ -29,6 +29,8 @@ def make_app() -> App:
     app.cinema_value = None
     app.mp_value = None
     app.tone_value = None
+    app.ldac_value = None
+    app.ldac_unlocked = None
     return app
 
 

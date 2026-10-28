@@ -21,6 +21,10 @@ class ControlState:
     cinema: bool | None = None
     multipoint: bool | None = None
     tone: int | None = None
+    #: LDAC 高清解码开关；None = 未读到
+    ldac: bool | None = None
+    #: LDAC 是否已在 App 里激活（走 FIIL 服务器，PC 端只能读不能改）
+    ldac_unlocked: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,7 @@ CONTROL_GROUPS: tuple[ControlGroup, ...] = (
     ControlGroup("cinema", "影院模式", _bool_options("cinema")),
     ControlGroup("multipoint", "蓝牙畅连", _bool_options("multipoint")),
     ControlGroup("tone", "语音提示音量", _enum_options("tone", ToneVolume)),
+    ControlGroup("ldac", "LDAC 高清解码", _bool_options("ldac")),
 )
 
 # 连接到耳机才有意义的操作
@@ -71,6 +76,12 @@ def menu_model(state: ControlState) -> tuple[ControlGroup, ...]:
     groups: list[ControlGroup] = []
     for group in CONTROL_GROUPS:
         current = getattr(state, group.action)
+        label = group.label
+        # LDAC 需要先在官方 App 里激活（激活码由 FIIL 服务器下发，PC 端离线做不到），
+        # 未激活时把档位禁用并把原因写进分组标题，避免用户点了没反应以为是 bug。
+        locked = group.action == "ldac" and state.ldac_unlocked is not True
+        if locked:
+            label = f"{group.label}（需先在手机 App 激活）"
         options: list[ControlOption] = []
         for option in group.options:
             value = int(option.value) if isinstance(option.value, int) and not isinstance(
@@ -84,8 +95,8 @@ def menu_model(state: ControlState) -> tuple[ControlGroup, ...]:
                     option.label,
                     value,
                     checked=current == value,
-                    enabled=state.connected,
+                    enabled=state.connected and not locked,
                 )
             )
-        groups.append(ControlGroup(group.action, group.label, tuple(options)))
+        groups.append(ControlGroup(group.action, label, tuple(options)))
     return tuple(groups)

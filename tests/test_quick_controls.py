@@ -22,7 +22,7 @@ def test_disconnected_snapshot_disables_every_control():
 def test_menu_model_checks_modes_and_hides_gaia_levels_until_supported():
     groups = menu_model(ControlState(connected=True, maf=1, low_latency=1,
                                      cinema=True, multipoint=False, tone=2))
-    maf, latency, cinema, multipoint, tone = groups
+    maf, latency, cinema, multipoint, tone, _ldac = groups
     assert [o.checked for o in maf.options] == [False, True, False, False, False]
     # Mate 机型只支持 0/1 两档：不生成会被耳机拒绝的 音乐/视频 项
     assert [int(o.value) for o in latency.options] == [0, 1]

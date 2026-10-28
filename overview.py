@@ -64,6 +64,8 @@ def build_overview(
     multipoint: bool | None = None,
     tone: int | None = None,
     battery: Any = None,
+    ldac: bool | None = None,
+    ldac_unlocked: bool | None = None,
 ) -> list[OverviewItem]:
     """把当前已知状态整理成一行行总览卡片。未知一律显示 --，绝不编造默认值。"""
     items = list(battery_items(battery))
@@ -93,11 +95,18 @@ def build_overview(
         items.append(OverviewItem("tone", "提示音量",
                                   TONE_LABELS.get(int(tone), str(tone)), "ok"))
 
+    # LDAC：未激活时耳机拒绝一切开关操作（激活码由 FIIL 服务器下发，PC 端做不到），
+    # 所以卡片直接写「未激活」并标黄，而不是显示成「关」——后者看起来像开关坏了。
+    if ldac_unlocked is False:
+        items.append(OverviewItem("ldac", "LDAC 高清", "未激活", "warn"))
+    else:
+        ldac_text, ldac_tone = _on_off(ldac)
+        items.append(OverviewItem("ldac", "LDAC 高清", ldac_text, ldac_tone))
+
     if not connected:
         # 未连接时读数全部退回未知：避免掉线后界面还挂着上次的数字骗人
         return [OverviewItem(i.key, i.label, "--", "idle") for i in items]
     return items
-
 
 def connection_text(connected: bool, switching: bool = False) -> tuple[str, str]:
     """顶部状态胶囊的文案与 tone。"""

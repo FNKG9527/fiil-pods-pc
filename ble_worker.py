@@ -242,6 +242,8 @@ class BleWorker(threading.Thread):
         self._got_ll = False
         self._got_mp = False
         self._got_tone = False
+        self._got_ldac = False
+        self._got_ldac_unlock = False
         # True 表示当前断开是我们主动发起，用于抑制 disconnected_callback 的重复上报
         self._closing: bool = False
         # 畅连（多点）切换后耳机一定会主动踢掉 BLE 链路（主从角色互换）。
@@ -470,6 +472,7 @@ class BleWorker(threading.Thread):
         # 间隔 0.12s 太密：耳机侧对连续查询会丢包（实测握手阶段偶发 0/3 全丢）。
         # 0.25s 是实测稳定的下限；也不用更大，否则连接后要等太久才看到数据。
         self._got_ll = self._got_mp = self._got_tone = False
+        self._got_ldac = self._got_ldac_unlock = False
         for name, frame in (
             ("GET_VERSION", self.protocol.request_version()),
             ("GET_DEVICE_NAME", self.protocol.request_device_name()),
@@ -479,6 +482,8 @@ class BleWorker(threading.Thread):
             ("GET_LOW_LATENCY", self.protocol.request_low_latency()),
             ("GET_MULTIPOINT", self.protocol.request_multipoint()),
             ("GET_TONE（语音提示音量）", self.protocol.request_tone_volume()),
+            ("GET_LDAC_UNLOCK（LDAC 激活态）", self.protocol.request_ldac_unlock()),
+            ("GET_LDAC_SWITCH（LDAC 开关）", self.protocol.request_ldac_switch()),
             ("GET_EQ", self.protocol.request_eq()),
         ):
             await self._send_raw(name, frame)
@@ -491,6 +496,10 @@ class BleWorker(threading.Thread):
             await self._send_raw("GET_MULTIPOINT（补读）", self.protocol.request_multipoint())
         if not self._got_tone:
             await self._send_raw("GET_TONE（补读）", self.protocol.request_tone_volume())
+        if not self._got_ldac_unlock:
+            await self._send_raw("GET_LDAC_UNLOCK（补读）", self.protocol.request_ldac_unlock())
+        if not self._got_ldac:
+            await self._send_raw("GET_LDAC_SWITCH（补读）", self.protocol.request_ldac_switch())
         return True
 
     def _on_ble_disconnected(self, _client: Any) -> None:
@@ -742,6 +751,17 @@ class BleWorker(threading.Thread):
                     self._emit("log", f"语音提示音量：{tv.label_cn}")
                     self._emit("tone", f"语音提示音量：{tv.label_cn}",
                                {"value": int(tv), "label": tv.label_cn})
+            elif q == 142:
+                unlocked = parse_bool(f.payload)
+                self._got_ldac_unlock = True
+                self._emit("log", f"LDAC 激活状态：{'已激活' if unlocked else '未激活'}")
+                self._emit("ldac_unlock", f"LDAC 激活：{'已激活' if unlocked else '未激活'}",
+                           {"unlocked": unlocked})
+            elif q == 143:
+                on = parse_bool(f.payload)
+                self._got_ldac = True
+                self._emit("log", f"LDAC 高清解码：{'开' if on else '关'}")
+                self._emit("ldac", f"LDAC：{'开' if on else '关'}", {"on": on})
             elif q == 4:
                 self._emit("log", f"EQ 曲线（{len(f.payload)}B）：{f.payload.hex(' ')}")
         except Exception as e:  # noqa: BLE001

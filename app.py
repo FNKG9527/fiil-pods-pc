@@ -79,6 +79,7 @@ class App:
         self.ll_expect: int | None = None
         self.mp_expect: bool | None = None
         self.tone_expect: int | None = None
+        self.ldac_expect: bool | None = None
 
         # 托盘菜单用的最后已知状态（None = 还没读到，不要编造默认值）
         self.maf_value: int | None = None
@@ -86,6 +87,8 @@ class App:
         self.cinema_value: bool | None = None
         self.mp_value: bool | None = None
         self.tone_value: int | None = None
+        self.ldac_value: bool | None = None
+        self.ldac_unlocked: bool | None = None
 
         # 托盘与主线程调度：pystray 在自己的线程跑，所有 Tk 动作都排回主线程
         self._dispatch_q: queue.Queue = queue.Queue()
@@ -269,7 +272,7 @@ class App:
         ttk.Label(wrap, textvariable=self.maf_var, font=(theme.FONT_UI, 11, "bold"),
                   foreground=theme.color("accent")).pack(side=tk.LEFT)
 
-        ttk.Label(box_maf, foreground=theme.color("warn"), wraplength=520, justify=tk.LEFT,
+        ttk.Label(box_maf, foreground=theme.color("warn"), wraplength=440, justify=tk.LEFT,
                   text="注：五档全部实机验证通过（SET 0→4 逐档 ACK 成功、读回一致）。"
                        "模式切换约 1.75~2.0s 才生效，本程序在 2.2s 后读回判定，"
                        "此前显示「未确认」属正常。").pack(
@@ -352,6 +355,30 @@ class App:
                        "这是耳机自身行为，无法避免；程序会自动等待并重连（约 10~20 秒），"
                        "重连成功后自动重读全部状态。").pack(fill=tk.X, padx=8, pady=(2, 8))
 
+        # ---- ⑥b LDAC 高清解码 ----
+        box_ldac = ttk.LabelFrame(parent, text="⑥b LDAC 高清解码（990kbps 高码率）")
+        box_ldac.pack(fill=tk.X, pady=(0, 6))
+        lrow = ttk.Frame(box_ldac)
+        lrow.pack(fill=tk.X, padx=8, pady=(8, 2))
+
+        self.ldac_on = tk.BooleanVar(value=False)
+        self.chk_ldac = ttk.Checkbutton(lrow, text="开启 LDAC", variable=self.ldac_on,
+                                        command=self._on_set_ldac)
+        self.chk_ldac.pack(side=tk.LEFT)
+        self.ldac_state = tk.StringVar(value="--")
+        ttk.Label(lrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
+        ttk.Label(lrow, textvariable=self.ldac_state, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
+
+        self.ldac_lock_var = tk.StringVar(value="")
+        ttk.Label(box_ldac, textvariable=self.ldac_lock_var, foreground=theme.color("warn"),
+                  wraplength=430, justify=tk.LEFT).pack(fill=tk.X, padx=8, pady=(0, 4))
+
+        ttk.Label(box_ldac, foreground=theme.color("muted"), wraplength=430, justify=tk.LEFT,
+                  text="说明：LDAC 需要先在官方 FIIL+ App 里完成激活（激活码由 FIIL 服务器下发，"
+                       "PC 端离线无法代办），激活后本程序即可直接开关。开启时会自动先关闭低延迟"
+                       "（两者互斥），耳机可能短暂重连。").pack(fill=tk.X, padx=8, pady=(0, 8))
+
         # ---- ⑦ 原始 Hex 控制台入口 ----
         box_raw = ttk.LabelFrame(parent, text="⑦ 原始 Hex（直接手写字节发到耳机）")
         box_raw.pack(fill=tk.BOTH, expand=True)
@@ -364,7 +391,7 @@ class App:
         ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("muted"), font=(theme.FONT_MONO, 9),
                   text="帧结构：[seq] [cid] [type] [reserved] [lenField] [cmdId] [payloadLen] [payload…]"
                   ).pack(anchor=tk.W, padx=8, pady=(0, 2))
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("idle"),
+        ttk.Label(box_raw, justify=tk.LEFT, wraplength=430, foreground=theme.color("idle"),
                   text="例：00 27 01 00 02 01 00 = 「查电量」—— seq=00 cid=0x27(查询) type=01(请求) "
                        "lenField=02 cmdId=01(电量) payloadLen=00（无参数）"
                   ).pack(anchor=tk.W, padx=8, pady=(0, 4))
@@ -384,8 +411,6 @@ class App:
 
         ttk.Label(box_raw, text="常见命令（点击填入）：", foreground=theme.color("muted")).pack(
             anchor=tk.W, padx=8, pady=(6, 0))
-        quick = ttk.Frame(box_raw)
-        quick.pack(fill=tk.X, padx=8, pady=2)
         presets = [
             ("setUnlock", "00 27 01 00 04 FF 02 02 34"),
             ("GET_VERSION", "00 27 01 00 02 02 00"),
@@ -393,9 +418,14 @@ class App:
             ("SET_MAF=1", "00 2C 01 00 01 01"),
             ("SET_CI=1", "00 32 01 00 01 01"),
         ]
-        for label, hx in presets:
-            ttk.Button(quick, text=label, width=12,
-                       command=lambda h=hx: self._fill_hex(h)).pack(side=tk.LEFT, padx=1)
+        # 分两行放：5 个按钮挤一行时自然宽度 480px，超过左栏 470px 会把整个面板
+        # 撑宽并顶出横向裁切（v1.2.0 的实测缺陷）。3+2 分行后每行都留有余量。
+        for row_presets in (presets[:3], presets[3:]):
+            quick = ttk.Frame(box_raw)
+            quick.pack(fill=tk.X, padx=8, pady=2)
+            for label, hx in row_presets:
+                ttk.Button(quick, text=label, width=12,
+                           command=lambda h=hx: self._fill_hex(h)).pack(side=tk.LEFT, padx=1)
 
         # ---- 静默监听 ----
         box_listen = ttk.LabelFrame(parent, text="⑧ 静默监听（逆向取证）")
@@ -473,6 +503,8 @@ class App:
             multipoint=self.mp_value,
             tone=self.tone_value,
             battery=self.battery_state,
+            ldac=self.ldac_value,
+            ldac_unlocked=self.ldac_unlocked,
         )
         for i, item in enumerate(items):
             if item.key not in self.overview_cards:
@@ -490,9 +522,10 @@ class App:
                 evt = self.evt_q.get_nowait()
                 self._handle_event(evt)
                 if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint",
-                                "tone", "battery"):
+                                "tone", "battery", "ldac", "ldac_unlock"):
                     dirty_overview = True
-                if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint", "tone"):
+                if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint", "tone",
+                                "ldac", "ldac_unlock"):
                     self._refresh_tray_menu()
         except queue.Empty:
             pass
@@ -509,6 +542,8 @@ class App:
             cinema=self.cinema_value,
             multipoint=self.mp_value,
             tone=self.tone_value,
+            ldac=self.ldac_value,
+            ldac_unlocked=self.ldac_unlocked,
         )
 
     def _tray_items(self) -> list:
@@ -560,6 +595,9 @@ class App:
             self._on_set_multipoint()
         elif action == "tone":
             self._on_set_tone(int(value))
+        elif action == "ldac":
+            self.ldac_on.set(bool(value))
+            self._on_set_ldac()
 
     # -------------------------------------------------------------- 设置
     def open_settings(self, page: str | None = None) -> None:
@@ -610,6 +648,7 @@ class App:
         else:
             for _card, _lbl, _val in self.overview_cards.values():
                 _card.grid()
+        self._apply_ldac_lock()
 
     # -------------------------------------------------------------- 窗口
     def _install_window_callbacks(self) -> None:
@@ -814,6 +853,22 @@ class App:
                     "提示音量 校验通过" if val == self.tone_expect
                     else f"提示音量 未确认：期望 {self.tone_expect}，读回 {val}")
                 self.tone_expect = None
+        elif e.kind == "ldac":
+            on = bool((e.payload or {}).get("on"))
+            self.ldac_value = on
+            self.ldac_on.set(on)
+            self.ldac_state.set("开" if on else "关")
+            self._parse_line(e.text)
+            if self.ldac_expect is not None:
+                self.status.set(
+                    "LDAC 校验通过" if on == self.ldac_expect
+                    else f"LDAC 未确认：期望 {self.ldac_expect}，读回 {on}")
+                self.ldac_expect = None
+        elif e.kind == "ldac_unlock":
+            unlocked = bool((e.payload or {}).get("unlocked"))
+            self.ldac_unlocked = unlocked
+            self._parse_line(e.text)
+            self._apply_ldac_lock()
         elif e.kind == "setack":
             payload = e.payload or {}
             ok = bool(payload.get("ok"))
@@ -910,6 +965,9 @@ class App:
         self.root.after(480, lambda: self.worker.submit(Command("call", ("request_cinema", "GET_SPATIAL"))))
         self.root.after(600, lambda: self.worker.submit(Command("call", ("request_low_latency", "GET_LOW_LATENCY"))))
         self.root.after(720, lambda: self.worker.submit(Command("call", ("request_multipoint", "GET_MULTIPOINT"))))
+        self.root.after(840, lambda: self.worker.submit(Command("call", ("request_tone_volume", "GET_TONE"))))
+        self.root.after(960, lambda: self.worker.submit(Command("call", ("request_ldac_unlock", "GET_LDAC_UNLOCK"))))
+        self.root.after(1080, lambda: self.worker.submit(Command("call", ("request_ldac_switch", "GET_LDAC_SWITCH"))))
         self.status.set("已请求全部状态（依次读取）")
 
     def _send_preset(self, name: str, builder: str) -> None:
@@ -983,6 +1041,63 @@ class App:
                         "程序会自动等待并重连（约 10~20 秒），请勿手动操作。")
         # 畅连切换后 BLE 必断，1.5s 后的读回一定落到「未连接」。校验改在自动重连
         # 成功后由握手重读完成（见 ble_worker._reconnect_loop），这里不再定时发 GET。
+
+    # -- LDAC 高清解码 ---------------------------------------------------------
+    def _apply_ldac_lock(self) -> None:
+        """按激活态启用/禁用 LDAC 开关，并把原因写清楚。
+
+        未激活时耳机不接受开关（协议层也没有可离线完成的激活手段），
+        所以这里禁用控件而不是让用户点了之后看到「被耳机拒绝」。
+        """
+        unlocked = self.ldac_unlocked
+        if unlocked is None:
+            self.ldac_lock_var.set("")
+            state = "disabled"
+        elif unlocked:
+            self.ldac_lock_var.set("")
+            state = "normal"
+        else:
+            self.ldac_lock_var.set(
+                "⚠ 未激活：请先在手机 FIIL+ App 中完成 LDAC 激活（激活码由 FIIL 服务器下发，"
+                "本程序无法代办）。激活后回到这里点「刷新全部状态」即可开关。")
+            state = "disabled"
+        try:
+            self.chk_ldac.configure(state=state)
+        except Exception:  # noqa: BLE001 - 控件已销毁（窗口正在关闭）
+            pass
+
+    def _on_set_ldac(self) -> None:
+        if not self.connected:
+            messagebox.showwarning("未连接", "请先连接耳机。")
+            self.ldac_on.set(not self.ldac_on.get())
+            return
+        if not self.ldac_unlocked:
+            messagebox.showwarning(
+                "LDAC 未激活",
+                "LDAC 需要先在手机 FIIL+ App 中激活（激活码由 FIIL 服务器下发，PC 端离线无法代办）。"
+                "激活后回到本程序点「刷新全部状态」即可直接开关。",
+                parent=self.root)
+            self.ldac_on.set(bool(self.ldac_value))
+            return
+        on = self.ldac_on.get()
+        self.ldac_expect = on
+        if on:
+            # 官方 App 在开 LDAC 前先关低延迟：两者互斥，不关会互相顶掉。
+            self.ll_expect = 0
+            self.worker.submit(Command("set", ("set_low_latency", 0, "SET_LOW_LATENCY=0(开LDAC前)")))
+            self.status.set("正在关闭低延迟（LDAC 与低延迟互斥），随后开启 LDAC…")
+            self.root.after(400, lambda: self._submit_ldac(True))
+        else:
+            self._submit_ldac(False)
+
+    def _submit_ldac(self, on: bool) -> None:
+        self.worker.submit(Command("set", ("set_ldac_switch", on,
+                                           f"SET_LDAC={'1' if on else '0'}")))
+        self.status.set(f"已下发 LDAC={'开' if on else '关'}，等待读回校验…"
+                        "（切换后耳机可能短暂重连）")
+        # 开关生效 + 可能的链路抖动，留足 2s 再读回
+        self.root.after(2000, lambda: self._send_preset("GET_LDAC_SWITCH(校验)",
+                                                        "request_ldac_switch"))
 
     # -- 语音提示音量 ---------------------------------------------------------
     def _on_set_tone(self, level: int) -> None:

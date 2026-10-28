@@ -11,7 +11,7 @@ def test_disconnected_shows_all_unknown():
     items = ov.build_overview(connected=False, maf=1, cinema=True, tone=0)
     assert all(i.value == "--" and i.tone == "idle" for i in items)
     assert [i.key for i in items] == [
-        "battery", "maf", "low_latency", "cinema", "multipoint", "tone",
+        "battery", "maf", "low_latency", "cinema", "multipoint", "tone", "ldac",
     ]
 
 
