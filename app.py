@@ -214,17 +214,24 @@ class App:
 
         grid = ttk.Frame(box_bat)
         grid.pack(fill=tk.X, padx=8, pady=6)
+        # 竖排卡片（标签在上、数值在下）而不是「标签 数值 标签 数值」横排：
+        # 横排时 3 组在 450px 宽度里放不下，第三组的数字会被父容器裁掉。
+        for col in range(3):
+            grid.columnconfigure(col, weight=1, uniform="bat")
 
         self.bat_vars = {}
         self.bat_labels = {}
         for i, (key, label) in enumerate((("left", "左耳"), ("right", "右耳"), ("case", "充电盒"))):
-            lbl = ttk.Label(grid, text=label, width=7)
-            lbl.grid(row=0, column=i * 2, sticky=tk.W)
+            cell = ttk.Frame(grid)
+            cell.grid(row=0, column=i, sticky="nsew", padx=2)
+            lbl = ttk.Label(cell, text=label, foreground=theme.color("muted"),
+                            font=(theme.FONT_UI, 9))
+            lbl.pack(anchor=tk.W)
             self.bat_labels[key] = lbl
             v = tk.StringVar(value="--")
             self.bat_vars[key] = v
-            ttk.Label(grid, textvariable=v, font=("Segoe UI", 20, "bold"), width=7,
-                      foreground="#2c7a2c").grid(row=0, column=i * 2 + 1, sticky=tk.W)
+            ttk.Label(cell, textvariable=v, font=(theme.FONT_UI, 18, "bold"),
+                      foreground=theme.color("ok")).pack(anchor=tk.W)
 
         ttk.Button(box_bat, text="刷新电量 / 全部状态", command=self._on_refresh_all).pack(
             fill=tk.X, padx=8, pady=(0, 8))
@@ -254,10 +261,10 @@ class App:
                        command=lambda mm=m: self._on_set_maf(mm)).pack(side=tk.LEFT, padx=1)
 
         ttk.Label(wrap, text="当前读回：").pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Label(wrap, textvariable=self.maf_var, font=("Segoe UI", 11, "bold"),
-                  foreground="#1a5fb4").pack(side=tk.LEFT)
+        ttk.Label(wrap, textvariable=self.maf_var, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
 
-        ttk.Label(box_maf, foreground="#8a5a00", wraplength=520, justify=tk.LEFT,
+        ttk.Label(box_maf, foreground=theme.color("warn"), wraplength=520, justify=tk.LEFT,
                   text="注：五档全部实机验证通过（SET 0→4 逐档 ACK 成功、读回一致）。"
                        "模式切换约 1.75~2.0s 才生效，本程序在 2.2s 后读回判定，"
                        "此前显示「未确认」属正常。").pack(
@@ -275,8 +282,8 @@ class App:
         self.chk_cinema.pack(side=tk.LEFT)
         self.cinema_state = tk.StringVar(value="--")
         ttk.Label(crow, text="读回：").pack(side=tk.LEFT, padx=(16, 2))
-        ttk.Label(crow, textvariable=self.cinema_state, font=("Segoe UI", 11, "bold"),
-                  foreground="#1a5fb4").pack(side=tk.LEFT)
+        ttk.Label(crow, textvariable=self.cinema_state, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
 
         # ---- ⑤ 低延迟 ----
         box_ll = ttk.LabelFrame(parent, text="⑤ 低延迟模式")
@@ -294,10 +301,10 @@ class App:
             b.pack(side=tk.LEFT, padx=2)
             self.ll_btns[val] = b
         ttk.Label(lrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(lrow, textvariable=self.ll_var, font=("Segoe UI", 11, "bold"),
-                  foreground="#1a5fb4").pack(side=tk.LEFT)
+        ttk.Label(lrow, textvariable=self.ll_var, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
 
-        ttk.Label(box_ll, foreground="#8a5a00", wraplength=430, justify=tk.LEFT,
+        ttk.Label(box_ll, foreground=theme.color("warn"), wraplength=430, justify=tk.LEFT,
                   text="机型说明：Mate 机型（Key Max 等）只支持「关闭 / 开启」两档，"
                        "下发 音乐/视频 时耳机会在 ACK 里明确拒绝（payload=01），不是延迟没生效。"
                        "GAIA 老机型才有四档，读到 2/3 时会自动补出「音乐 / 视频」按钮。").pack(
@@ -315,8 +322,8 @@ class App:
         self.chk_mp.pack(side=tk.LEFT)
         self.mp_state = tk.StringVar(value="--")
         ttk.Label(mrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(mrow, textvariable=self.mp_state, font=("Segoe UI", 11, "bold"),
-                  foreground="#1a5fb4").pack(side=tk.LEFT)
+        ttk.Label(mrow, textvariable=self.mp_state, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
 
         trow = ttk.Frame(box_mp)
         trow.pack(fill=tk.X, padx=8, pady=(6, 2))
@@ -330,10 +337,10 @@ class App:
             b.pack(side=tk.LEFT, padx=2)
             self.tone_btns[val] = b
         ttk.Label(trow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(trow, textvariable=self.tone_var, font=("Segoe UI", 11, "bold"),
-                  foreground="#1a5fb4").pack(side=tk.LEFT)
+        ttk.Label(trow, textvariable=self.tone_var, font=(theme.FONT_UI, 11, "bold"),
+                  foreground=theme.color("accent")).pack(side=tk.LEFT)
 
-        ttk.Label(box_mp, foreground="#8a5a00", wraplength=430, justify=tk.LEFT,
+        ttk.Label(box_mp, foreground=theme.color("warn"), wraplength=430, justify=tk.LEFT,
                   text="⚠ 畅连切换（开或关）时，耳机固件会立刻断开 BLE 链路并互换主从角色。"
                        "这是耳机自身行为，无法避免；程序会自动等待并重连（约 10~20 秒），"
                        "重连成功后自动重读全部状态。").pack(fill=tk.X, padx=8, pady=(2, 8))
@@ -342,21 +349,21 @@ class App:
         box_raw = ttk.LabelFrame(parent, text="⑦ 原始 Hex（直接手写字节发到耳机）")
         box_raw.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground="#444",
+        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("text"),
                   text="这就是 FIIL 耳机真正认的协议帧本身：一串十六进制字节，"
                        "按空格分开。上面所有按钮（降噪、影院、畅连…）最终都是拼出这样一串字节、"
                        "写到 ff17 特征值。这里给你直接手写的机会 —— 用来试我还没逆向出来的命令。"
                   ).pack(anchor=tk.W, padx=8, pady=(8, 2))
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground="#666", font=("Consolas", 9),
+        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("muted"), font=(theme.FONT_MONO, 9),
                   text="帧结构：[seq] [cid] [type] [reserved] [lenField] [cmdId] [payloadLen] [payload…]"
                   ).pack(anchor=tk.W, padx=8, pady=(0, 2))
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground="#888",
+        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("idle"),
                   text="例：00 27 01 00 02 01 00 = 「查电量」—— seq=00 cid=0x27(查询) type=01(请求) "
                        "lenField=02 cmdId=01(电量) payloadLen=00（无参数）"
                   ).pack(anchor=tk.W, padx=8, pady=(0, 4))
 
         ttk.Label(box_raw, text="Hex（空格分隔）：").pack(anchor=tk.W, padx=8, pady=(4, 2))
-        self.ent_hex = ttk.Entry(box_raw, font=("Consolas", 10))
+        self.ent_hex = ttk.Entry(box_raw, font=(theme.FONT_MONO, 10))
         self.ent_hex.pack(fill=tk.X, padx=8)
         self.ent_hex.insert(0, "00 27 01 00 02 01 00")
 
@@ -368,7 +375,7 @@ class App:
         ttk.Button(raw_btns, text="填入 GET_MAF", width=14,
                    command=lambda: self._fill_hex("00 27 01 00 02 0C 00")).pack(side=tk.LEFT)
 
-        ttk.Label(box_raw, text="常见命令（点击填入）：", foreground="#555").pack(
+        ttk.Label(box_raw, text="常见命令（点击填入）：", foreground=theme.color("muted")).pack(
             anchor=tk.W, padx=8, pady=(6, 0))
         quick = ttk.Frame(box_raw)
         quick.pack(fill=tk.X, padx=8, pady=2)
@@ -434,6 +441,9 @@ class App:
         card = tk.Frame(self._overview_grid, bg=theme.color("card"),
                         highlightbackground=theme.color("border"), highlightthickness=1)
         card.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+        # 设置里关掉总览时，后建的卡片也要立刻隐藏，不能等下次应用设置
+        if not self.settings.show_status_overview:
+            card.grid_remove()
 
         lbl = tk.Label(card, text=label, bg=theme.color("card"),
                        fg=theme.color("muted"), font=(theme.FONT_UI, 9), anchor=tk.W)
