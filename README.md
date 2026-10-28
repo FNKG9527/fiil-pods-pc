@@ -96,7 +96,7 @@ pip install pyinstaller
 powershell -ExecutionPolicy Bypass -File build\build.ps1
 ```
 
-产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.1.0.exe`（安装包）。
+产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.2.0.exe`（安装包）。
 
 ---
 
@@ -107,12 +107,15 @@ powershell -ExecutionPolicy Bypass -File build\build.ps1
 3. 在列表里选中你的耳机 → 点「连接」。
    - 列表里没有？在「直连地址」里填 BLE 地址（形如 `B0:F1:A3:00:00:01`）后点「按地址连接」。
    - 上次连过的地址会自动记住。
-4. 连接成功后左侧各功能块即可使用；右侧会实时显示收发的十六进制帧。
+4. 连接成功后左侧各功能块即可使用；右侧是状态总览卡片，实时反映电量与各模式。
+5. 收发日志（原始字节）与解析结果在「⚙ 设置 → 日志」页，关掉主窗口后仍会继续记录。
 
 ### 数据存放位置
 
 | 内容 | 源码运行 | 安装版 |
 |---|---|---|
+| 设置（`settings.json`） | `<仓库根>/settings.json` | `%LOCALAPPDATA%\FiilPodsPC\settings.json` |
+| 窗口尺寸（`window.json`） | `<仓库根>/window.json` | `%LOCALAPPDATA%\FiilPodsPC\window.json` |
 | 抓包日志 / CSV | `<仓库根>/out/` | `%LOCALAPPDATA%\FiilPodsPC\out\` |
 | 已知设备表 | `<仓库根>/known_devices.json` | `%LOCALAPPDATA%\FiilPodsPC\known_devices.json` |
 
@@ -143,7 +146,14 @@ powershell -ExecutionPolicy Bypass -File build\build.ps1
 fiil-pods-pc/
 ├── app.py                  # tkinter GUI 主程序（入口）
 ├── ble_worker.py           # BLE 异步工作线程 + 事件队列
+├── ble_connect.py          # 四段式连接策略（缓存直连 → 地址直连 → 边扫边连 → 兜底）
 ├── fiil_protocol.py        # 协议层：组帧、解析、枚举
+├── settings.py             # 设置模型：默认值、校验、JSON 落盘
+├── settings_window.py      # 设置窗口（连接 / 界面 / 日志三页）
+├── log_store.py            # 有上限的环形日志缓冲
+├── overview.py             # 主界面状态总览的数据模型
+├── theme.py                # 配色、字体、圆角与状态色
+├── ui_state.py             # 窗口尺寸持久化
 ├── quick_controls.py       # 托盘与主窗口共用的控制目录 / 菜单模型
 ├── tray_support.py         # 系统托盘后端（pystray + Pillow，延迟导入）
 ├── window_lifecycle.py     # 主线程调度与窗口显示/隐藏/退出状态机
