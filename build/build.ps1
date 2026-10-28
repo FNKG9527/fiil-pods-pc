@@ -1,4 +1,4 @@
-# 一键重新打包（PowerShell）
+﻿# 一键重新打包（PowerShell）
 # 用法：  powershell -ExecutionPolicy Bypass -File build\build.ps1
 # 前置：  pip install pyinstaller  +  安装 Inno Setup 6
 $ErrorActionPreference = 'Stop'
