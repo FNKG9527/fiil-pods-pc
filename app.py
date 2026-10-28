@@ -29,6 +29,7 @@ from ble_worker import BleWorker, Command, Event
 from fiil_protocol import MafMode
 from log_store import LogStore
 from quick_controls import ControlState, menu_model
+from scroll_frame import ScrollFrame
 from tray_support import TrayIcon, build_menu_items, load_tray_backend
 from window_lifecycle import MainThreadDispatcher, WindowLifecycle
 
@@ -192,14 +193,18 @@ class App:
         body = ttk.Frame(self.root)
         body.pack(fill=tk.BOTH, expand=True, **pad)
 
-        left = ttk.Frame(body, width=470)
+        left = ScrollFrame(body, width=470)
         left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+        # 左栏 7 个面板自然高度合计约 1033px，1280x820 窗口只分得到约 682px。
+        # 直接 pack 会把底部面板压扁到看不见（实测 ⑦ 只剩 45px、⑧ 高度 0），
+        # 所以套一层滚动容器：放得下时无滚动条，放不下时出现竖向滚动条。
         left.pack_propagate(False)
+        self.left_scroll = left
 
         right = ttk.Frame(body)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._build_left(left)
+        self._build_left(left.body)
         self._build_right(right)
 
         # ---- 底部状态栏 ----
@@ -331,12 +336,14 @@ class App:
         self.tone_var = tk.StringVar(value="--")
         self.tone_btns: dict[int, ttk.Button] = {}
         # 线值反序：0=高 / 1=中 / 2=低 / 3=静音（FIIL 原文 f43_select_operate_volume）
+        # 按钮宽度压到 8：450px 的行里要塞下 4 个按钮 + 两段说明文字，
+        # 用 width=9 时整行需要 470px，末尾的读回值会被父容器裁掉 20px。
         for val, label in ((0, "音量高"), (1, "音量中"), (2, "音量低"), (3, "静音")):
-            b = ttk.Button(trow, text=label, width=9,
+            b = ttk.Button(trow, text=label, width=8,
                            command=lambda v=val: self._on_set_tone(v))
-            b.pack(side=tk.LEFT, padx=2)
+            b.pack(side=tk.LEFT, padx=1)
             self.tone_btns[val] = b
-        ttk.Label(trow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
+        ttk.Label(trow, text="读回：").pack(side=tk.LEFT, padx=(10, 2))
         ttk.Label(trow, textvariable=self.tone_var, font=(theme.FONT_UI, 11, "bold"),
                   foreground=theme.color("accent")).pack(side=tk.LEFT)
 
