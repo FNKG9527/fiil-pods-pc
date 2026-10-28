@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import ble_connect as bc  # noqa: E402
 import ble_worker as bw  # noqa: E402
 
 PASS = 0
@@ -81,7 +82,14 @@ FakeClient.connect_should_fail = False
 
 
 def install_fakes() -> None:
+    # 连接已改走 ble_connect.connect_fast，工厂函数在那里定义，两个都要打补丁
     bw.BleakClient = FakeClient  # type: ignore[assignment]
+    bc._default_client_factory = (  # type: ignore[assignment]
+        lambda target, timeout, callback: FakeClient(
+            getattr(target, "address", target), timeout=timeout, disconnected_callback=callback
+        )
+    )
+    bc._default_scanner_factory = lambda cb: FakeScanner(cb)  # type: ignore[assignment]
 
     # 把退避缩短到毫秒级，否则测试要跑 30 秒
     _real_sleep = asyncio.sleep
@@ -92,10 +100,25 @@ def install_fakes() -> None:
     bw.asyncio.sleep = fast_sleep  # type: ignore[assignment]
 
 
+class FakeScanner:
+    """永远扫不到目标的扫描器：连接失败场景要快速走完，不能真等 8 秒。"""
+
+    def __init__(self, detection_callback) -> None:
+        self.detection_callback = detection_callback
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
 def make_worker() -> tuple[bw.BleWorker, list[tuple[str, str]]]:
     evq: queue.Queue = queue.Queue()
     cmdq: queue.Queue = queue.Queue()
     w = bw.BleWorker(evq, cmdq)
+    # 扫描超时压到毫秒级：连接失败场景要走完「扫描寻找」分支，不能真等 8 秒
+    w.scan_timeout = 0.05
     captured: list[tuple[str, str, object]] = []
     orig = w._emit
 

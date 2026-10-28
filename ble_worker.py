@@ -28,6 +28,7 @@ from typing import Any
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
+from ble_connect import DeviceCache, connect_fast
 from fiil_protocol import (
     CHAR_NOTIFY_UUID,
     CHAR_WRITE_UUID,
@@ -248,6 +249,11 @@ class BleWorker(threading.Thread):
         # 这是固件行为，不是我们的 bug —— 唯一能做的是断线后自动重连并把状态重读一遍。
         self._reconnect_after_multipoint: bool = False
         self._reconnect_task: asyncio.Task | None = None
+        # 扫到过的 BLEDevice 缓存：下次连同一地址可直接建连，跳过一轮完整扫描
+        self._device_cache = DeviceCache()
+        # 扫描时长/连接超时由设置页下发（默认值与 v1.1.0 一致）
+        self.scan_timeout: float = 8.0
+        self.connect_timeout: float = 20.0
 
     # -- 对外 ---------------------------------------------------------------
     def submit(self, cmd: Command) -> None:
@@ -325,6 +331,11 @@ class BleWorker(threading.Thread):
             await self._start_listen(float(cmd.payload or 60))
         elif cmd.kind == "stop_listen":
             await self._stop_listen()
+        elif cmd.kind == "config":
+            # payload = (scan_timeout, connect_timeout)，由设置页实时下发
+            scan_timeout, connect_timeout = cmd.payload  # type: ignore[misc]
+            self.scan_timeout = float(scan_timeout)
+            self.connect_timeout = float(connect_timeout)
         else:
             self._emit("error", f"未知命令 {cmd.kind}")
 
@@ -349,7 +360,7 @@ class BleWorker(threading.Thread):
     async def _scan(self) -> None:
         self._emit("state", "扫描中…")
         try:
-            found = await BleakScanner.discover(timeout=8.0, return_adv=True)
+            found = await BleakScanner.discover(timeout=self.scan_timeout, return_adv=True)
         except Exception as e:  # noqa: BLE001
             self._emit("error", f"扫描失败：{e}")
             return
@@ -358,6 +369,7 @@ class BleWorker(threading.Thread):
         rows = []
         for dev, adv in found.values():
             address = dev.address
+            self._device_cache.remember(dev)  # 扫描顺手缓存，下次连接可直接用
             # 名称的三个来源，按可信度排序（实测 FIIL 耳机在 BLE 广播里常常不带名字）：
             # ① 广播包里的 local_name / dev.name（最准，但 FIIL 通常没有）
             # ② Windows 蓝牙配对/历史缓存（WinRT 里查，连通用的经典蓝牙名字一起拿到）
@@ -403,18 +415,27 @@ class BleWorker(threading.Thread):
         """
         self.address = address
         self._emit("state", f"连接 {address} …")
+        # 连接策略见 ble_connect：缓存直连 → 地址直连 → 边扫边连 → 地址兜底。
+        # 关键收益：耳机此刻不广播时不再白等 20 秒扫描超时。
         # disconnected_callback 必须注册：否则耳机主动断线（走远/关机/被别的 App 抢走）
         # 时 Bleak 已断开但 GUI 仍显示「已连接」，后续每次发送都只是静默失败。
-        client = BleakClient(address, timeout=20.0,
-                             disconnected_callback=self._on_ble_disconnected)
-        try:
-            await asyncio.wait_for(client.connect(), timeout=20.0)
-        except Exception as e:  # noqa: BLE001
-            self._emit("error", f"连接失败：{e}")
+        result = await connect_fast(
+            address,
+            cache=self._device_cache,
+            scan_timeout=self.scan_timeout,
+            connect_timeout=self.connect_timeout,
+            disconnected_callback=self._on_ble_disconnected,
+            on_stage=lambda stage: self._emit("state", f"连接中：{stage}"),
+        )
+        client = result.client
+        if client is None:
+            self._emit("error", f"连接失败：{result.error}")
+            self._emit("log", f"[!] 连接耗时明细：{result.summary()}")
             if not keep_state:
                 self._emit("conn", "未连接", {"connected": False})
                 self._emit("state", "未连接")
             return False
+        self._emit("log", f"[+] 连接路径：{result.stage}，{result.summary()}")
 
         self.client = client
         self.protocol = FiilProtocol()
