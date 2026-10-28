@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import settings as st
 from app import App
 from fiil_protocol import MafMode
 
 
 def make_app() -> App:
     app = App.__new__(App)
+    app.settings = st.DEFAULTS.with_changes(confirm_before_exit=False)
     app.connected = True
     app.worker = Mock()
     app.status = Mock()

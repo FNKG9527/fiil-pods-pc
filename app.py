@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import csv
 import os
 import queue
 import sys
@@ -19,16 +18,22 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 from typing import Any
 
+import overview as ov
+import settings as st
+import ui_state
+import ui_theme as theme
 from ble_worker import BleWorker, Command, Event
 from fiil_protocol import MafMode
+from log_store import LogStore
 from quick_controls import ControlState, menu_model
 from tray_support import TrayIcon, build_menu_items, load_tray_backend
 from window_lifecycle import MainThreadDispatcher, WindowLifecycle
 
 APP_TITLE = "FiilPods PC 探针 — FIIL 耳机 BLE 逆向控制台"
+APP_VERSION = "1.2.0"
 
 
 def _app_dir() -> Path:
@@ -41,24 +46,31 @@ def _app_dir() -> Path:
 
 
 OUT_DIR = _app_dir() / "out"
+SETTINGS_FILE = _app_dir() / "settings.json"
+WINDOW_FILE = _app_dir() / "window.json"
 
 
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(APP_TITLE)
-        self.root.geometry("1280x820")
-        self.root.minsize(1080, 700)
+        self.root.title(f"{APP_TITLE}  v{APP_VERSION}")
+
+        # 设置先加载：窗口尺寸、扫描超时等都取决于它
+        self.settings, setting_warnings = st.load(SETTINGS_FILE)
+        self.log_store = LogStore(capacity=self.settings.log_max_lines)
+        size = ui_state.load(WINDOW_FILE) if self.settings.remember_window else ui_state.WindowSize()
+        self.root.geometry(size.geometry())
+        self.root.minsize(*ui_state.MIN_SIZE)
 
         self.evt_q: queue.Queue[Event] = queue.Queue()
         self.cmd_q: queue.Queue[Command] = queue.Queue()
         self.worker = BleWorker(self.evt_q, self.cmd_q)
         self.worker.start()
+        self._push_worker_config()
 
-        # 日志缓冲（导出用）
-        self.rows: list[dict[str, str]] = []
         self.connected = False
         self.scan_results: list[tuple[str, str, int | None, Any]] = []
+        self.battery_state: Any = None
 
         # 写后读回校验：记下期望值，收到回读时比对（None = 当前无待校验项）
         self.maf_expect: int | None = None
@@ -82,11 +94,17 @@ class App:
         )
         backend = load_tray_backend()
         self.tray = TrayIcon(backend, APP_TITLE, self._on_tray_action)
+        self.settings_window = None
 
         self._build_ui()
+        self._apply_settings_to_ui()
+        self._refresh_overview()
         self._prefill_last_addr()
         self.lifecycle = WindowLifecycle(root, self.tray, self.worker)
         self._install_window_callbacks()
+
+        for warning in setting_warnings:
+            self._append("sys", "", f"[设置] {warning}")
 
         # 托盘必须等界面建好后再启动：不可用时要往日志区写原因
         if backend.available and not self.tray.start(self._tray_items()):
@@ -95,6 +113,10 @@ class App:
             self._append("sys", "", f"[托盘] 不可用：{backend.error}")
 
         self.root.after(60, self._pump)
+
+        # 启动后直接隐藏到托盘（开机自启场景）；没有托盘时不能把用户困在看不见的窗口里
+        if self.settings.auto_hide_to_tray and getattr(self.tray, "available", False):
+            self.root.after(300, self.hide_to_tray)
 
     def _prefill_last_addr(self) -> None:
         """启动时把上次连过的地址填好：耳机不广播时一键即可连上，不用去翻日志。"""
@@ -110,14 +132,18 @@ class App:
             self.var_addr.set(addr)
             name = str(table.get(addr, {}).get("name") or "").strip()
             self.status.set(
-                f"上次连接：{name or 'FIIL 耳机'} [{addr}] —— 可直接点「按地址连接」"
+                f"上次连接：{name or 'FIIL 耳机'} [{addr}] —— 可直接点「连接」"
             )
+            # 设置里开了自动连接就直接连，省掉一次手动点击
+            if self.settings.auto_connect:
+                self.root.after(600, lambda: self.worker.submit(Command("connect", addr)))
+                self._append("sys", "", f"[设置] 启动自动连接已开启，正在连接上次设备 {addr}")
         except Exception:  # noqa: BLE001 - 预填失败不影响启动
             pass
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
-        pad = {"padx": 6, "pady": 4}
+        pad = {"padx": 8, "pady": 6}
 
         # ---- 顶部：连接条 ----
         top = ttk.LabelFrame(self.root, text="① 设备连接")
@@ -126,21 +152,25 @@ class App:
         row = ttk.Frame(top)
         row.pack(fill=tk.X, padx=8, pady=6)
 
-        ttk.Button(row, text="扫描设备", command=self._on_scan, width=12).pack(side=tk.LEFT)
-        self.cmb_dev = ttk.Combobox(row, width=48, state="readonly")
+        ttk.Button(row, text="扫描设备", command=self._on_scan, width=11).pack(side=tk.LEFT)
+        self.cmb_dev = ttk.Combobox(row, width=44, state="readonly")
         self.cmb_dev.pack(side=tk.LEFT, padx=8)
-        self.btn_conn = ttk.Button(row, text="连接", command=self._on_connect, width=10)
+        self.btn_conn = ttk.Button(row, text="连接", command=self._on_connect, width=8)
         self.btn_conn.pack(side=tk.LEFT)
-        ttk.Button(row, text="断开", command=self._on_disconnect, width=10).pack(side=tk.LEFT, padx=4)
-        # 后台运行与真正退出：托盘不可用时也不能把用户困在「只能隐藏」的状态
-        ttk.Button(row, text="后台运行", command=self.hide_to_tray,
-                   width=10).pack(side=tk.LEFT, padx=(12, 2))
-        ttk.Button(row, text="退出程序", command=self.request_exit,
-                   width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row, text="断开", command=self._on_disconnect, width=8).pack(side=tk.LEFT, padx=4)
 
-        self.lbl_state = ttk.Label(row, text="未连接", foreground="#c0392b")
-        self.lbl_state.pack(side=tk.LEFT, padx=12)
-        ttk.Label(row, text="状态：").pack(side=tk.LEFT)
+        # 状态胶囊：用 Label 模拟，避免 ttk 主题下 Button 无法着色的限制
+        self.lbl_state = tk.Label(row, text="未连接", fg="white", bg=theme.color("idle"),
+                                  padx=10, pady=2, font=(theme.FONT_UI, 9, "bold"))
+        self.lbl_state.pack(side=tk.LEFT, padx=(10, 4))
+
+        # 右侧动作按钮：设置 / 后台 / 退出
+        ttk.Button(row, text="退出程序", command=self.request_exit,
+                   width=9).pack(side=tk.RIGHT)
+        ttk.Button(row, text="后台运行", command=self.hide_to_tray,
+                   width=9).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row, text="⚙ 设置", command=self.open_settings,
+                   width=9).pack(side=tk.RIGHT)
 
         # ---- 直连地址（扫描不到时的逃生通道）----
         # 实测：FIIL 双模耳机被经典蓝牙占用时不再发 BLE 广播，扫描列表里根本没有它。
@@ -149,21 +179,21 @@ class App:
         row2.pack(fill=tk.X, padx=8, pady=(0, 6))
         ttk.Label(row2, text="直连地址：").pack(side=tk.LEFT)
         self.var_addr = tk.StringVar(value="")
-        ttk.Entry(row2, textvariable=self.var_addr, width=24).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Entry(row2, textvariable=self.var_addr, width=22).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(row2, text="按地址连接", command=self._on_connect_addr,
-                   width=12).pack(side=tk.LEFT)
+                   width=11).pack(side=tk.LEFT)
         ttk.Label(
             row2,
             text="（耳机不出现在扫描列表时用；上次连过的地址会自动记住）",
-            foreground="#666666",
+            foreground=theme.color("muted"),
         ).pack(side=tk.LEFT, padx=8)
 
-        # ---- 主体：左控制 / 右日志 ----
+        # ---- 主体：左控制 / 右状态总览 ----
         body = ttk.Frame(self.root)
         body.pack(fill=tk.BOTH, expand=True, **pad)
 
-        left = ttk.Frame(body, width=460)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 6))
+        left = ttk.Frame(body, width=470)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
         left.pack_propagate(False)
 
         right = ttk.Frame(body)
@@ -366,55 +396,91 @@ class App:
         ttk.Button(lrow, text="停止", command=lambda: self.worker.submit(Command("stop_listen"))).pack(side=tk.LEFT)
 
     def _build_right(self, parent: ttk.Frame) -> None:
-        nb = ttk.Notebook(parent)
-        nb.pack(fill=tk.BOTH, expand=True)
+        """右侧：状态总览卡片。
 
-        # --- 日志页 ---
-        tab1 = ttk.Frame(nb)
-        nb.add(tab1, text="收发日志（原始字节）")
+        v1.2.0 把原来的「收发日志 / 解析结果」两个标签页整个搬进了设置窗口的
+        「日志」页 —— 主窗口右侧改成一眼能看完的状态总览，不用再切标签。
+        """
+        box = ttk.LabelFrame(parent, text="⑨ 状态总览")
+        box.pack(fill=tk.BOTH, expand=True)
 
-        tb1 = ttk.Frame(tab1)
-        tb1.pack(fill=tk.X, padx=4, pady=4)
-        ttk.Button(tb1, text="复制全部", command=self._copy_log).pack(side=tk.LEFT)
-        ttk.Button(tb1, text="导出 TXT", command=self._export_txt).pack(side=tk.LEFT, padx=4)
-        ttk.Button(tb1, text="导出 CSV", command=self._export_csv).pack(side=tk.LEFT)
-        ttk.Button(tb1, text="清空", command=self._clear_log).pack(side=tk.LEFT, padx=4)
-        self.chk_autoscroll = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tb1, text="自动滚动", variable=self.chk_autoscroll).pack(side=tk.LEFT, padx=10)
+        head = ttk.Frame(box)
+        head.pack(fill=tk.X, padx=10, pady=(8, 4))
+        ttk.Label(head, text="当前耳机状态（连接后自动读取，也可点右侧刷新）",
+                  foreground=theme.color("muted")).pack(side=tk.LEFT)
+        ttk.Button(head, text="刷新全部", command=self._on_refresh_all,
+                   width=10).pack(side=tk.RIGHT)
 
-        self.txt = tk.Text(tab1, font=("Consolas", 9), wrap=tk.NONE, undo=False)
-        ys = ttk.Scrollbar(tab1, orient=tk.VERTICAL, command=self.txt.yview)
-        xs = ttk.Scrollbar(tab1, orient=tk.HORIZONTAL, command=self.txt.xview)
-        self.txt.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
-        self.txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ys.pack(side=tk.RIGHT, fill=tk.Y)
-        xs.pack(side=tk.BOTTOM, fill=tk.X)
+        # 卡片容器：3 列网格，随窗口宽度自适应
+        grid = ttk.Frame(box)
+        grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        for col in range(3):
+            grid.columnconfigure(col, weight=1, uniform="card")
 
-        self.txt.tag_configure("tx", foreground="#0b5394")
-        self.txt.tag_configure("rx", foreground="#2c7a2c")
-        self.txt.tag_configure("err", foreground="#c0392b")
-        self.txt.tag_configure("sys", foreground="#7f6000")
+        self.overview_cards: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
+        self._overview_grid = grid
 
-        # --- 解析页 ---
-        tab2 = ttk.Frame(nb)
-        nb.add(tab2, text="解析结果")
-        self.txt_parse = tk.Text(tab2, font=("Segoe UI", 10), wrap=tk.WORD)
-        ps = ttk.Scrollbar(tab2, orient=tk.VERTICAL, command=self.txt_parse.yview)
-        self.txt_parse.configure(yscrollcommand=ps.set)
-        self.txt_parse.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ps.pack(side=tk.RIGHT, fill=tk.Y)
+        # 兜底提示：日志搬去设置页之后，用户找不到日志时这里要指路
+        tip = tk.Frame(box, bg=theme.color("chip_bg"))
+        tip.pack(fill=tk.X, padx=10, pady=(6, 10))
+        tk.Label(
+            tip, bg=theme.color("chip_bg"), fg=theme.color("muted"),
+            font=(theme.FONT_UI, 9), justify=tk.LEFT, anchor=tk.W,
+            text="收发日志（原始字节）与解析结果已移到「⚙ 设置 → 日志」页，"
+                 "关掉主窗口后仍会继续记录。",
+        ).pack(fill=tk.X, padx=10, pady=8)
+
+    def _make_card(self, key: str, label: str, row: int, col: int) -> None:
+        card = tk.Frame(self._overview_grid, bg=theme.color("card"),
+                        highlightbackground=theme.color("border"), highlightthickness=1)
+        card.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+
+        lbl = tk.Label(card, text=label, bg=theme.color("card"),
+                       fg=theme.color("muted"), font=(theme.FONT_UI, 9), anchor=tk.W)
+        lbl.pack(fill=tk.X, padx=12, pady=(10, 0))
+
+        val = tk.Label(card, text="--", bg=theme.color("card"),
+                       fg=theme.color("idle"), font=(theme.FONT_UI, 18, "bold"),
+                       anchor=tk.W)
+        val.pack(fill=tk.X, padx=12, pady=(0, 10))
+
+        self.overview_cards[key] = (card, lbl, val)
+
+    def _refresh_overview(self) -> None:
+        """按当前已知状态重画总览。未知项一律 --，绝不用默认值冒充读数。"""
+        items = ov.build_overview(
+            connected=self.connected,
+            maf=self.maf_value,
+            low_latency=self.ll_value,
+            cinema=self.cinema_value,
+            multipoint=self.mp_value,
+            tone=self.tone_value,
+            battery=self.battery_state,
+        )
+        for i, item in enumerate(items):
+            if item.key not in self.overview_cards:
+                self._make_card(item.key, item.label, i // 3, i % 3)
+            _card, lbl, val = self.overview_cards[item.key]
+            lbl.configure(text=item.label)
+            val.configure(text=item.value, fg=theme.tone_color(item.tone))
 
     # -------------------------------------------------------------- 事件泵
     def _pump(self) -> None:
         self._dispatcher.pump()
+        dirty_overview = False
         try:
             while True:
                 evt = self.evt_q.get_nowait()
                 self._handle_event(evt)
+                if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint",
+                                "tone", "battery"):
+                    dirty_overview = True
                 if evt.kind in ("conn", "maf", "lowlatency", "cinema", "multipoint", "tone"):
                     self._refresh_tray_menu()
         except queue.Empty:
             pass
+        if dirty_overview:
+            self._refresh_overview()
         self.root.after(60, self._pump)
 
     # -------------------------------------------------------------- 托盘协调
@@ -478,9 +544,75 @@ class App:
         elif action == "tone":
             self._on_set_tone(int(value))
 
+    # -------------------------------------------------------------- 设置
+    def open_settings(self, page: str | None = None) -> None:
+        import settings_window as sw
+
+        self.settings_window = sw.open_settings(self, page)
+        self.settings_window.autoscroll = bool(self.settings.autoscroll)
+        # 打开时把缓冲里的历史日志整体灌进去，用户看到的是完整记录而不是打开之后的增量
+        self.settings_window.sync_from_store()
+
+    def apply_settings(self, new: st.Settings) -> None:
+        """「应用」：立刻生效但不写文件。"""
+        self.settings = new
+        self._apply_settings_to_ui()
+        self._push_worker_config()
+
+    def save_settings(self, new: st.Settings) -> None:
+        """「保存」：写文件 + 立刻生效。写失败要让用户知道，不能静默吞掉。"""
+        self.settings = new
+        self._apply_settings_to_ui()
+        self._push_worker_config()
+        try:
+            st.save(SETTINGS_FILE, new)
+        except OSError as exc:
+            messagebox.showerror("保存失败", f"设置文件写入失败：\n{exc}", parent=self.root)
+
+    def _push_worker_config(self) -> None:
+        """把连接相关设置推给后台线程（它是唯一真正连蓝牙的地方）。"""
+        try:
+            self.worker.submit(Command("config", (self.settings.scan_timeout,
+                                                  self.settings.connect_timeout)))
+        except Exception:  # noqa: BLE001 - 后台线程已退出时忽略
+            pass
+
+    def _apply_settings_to_ui(self) -> None:
+        """把设置里影响界面的部分同步到控件上（幂等，可反复调）。"""
+        self.log_store.set_capacity(self.settings.log_max_lines)
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.autoscroll = bool(self.settings.autoscroll)
+            try:
+                win.txt.configure(font=(theme.FONT_MONO, self.settings.log_font_size))
+            except tk.TclError:
+                pass
+        if not self.settings.show_status_overview:
+            for _card, _lbl, _val in self.overview_cards.values():
+                _card.grid_remove()
+        else:
+            for _card, _lbl, _val in self.overview_cards.values():
+                _card.grid()
+
     # -------------------------------------------------------------- 窗口
     def _install_window_callbacks(self) -> None:
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        self.root.bind("<Configure>", self._on_configure)
+
+    def _on_configure(self, event: Any) -> None:
+        """只记窗口自身的尺寸变化（子控件也会触发 <Configure>，要过滤掉）。"""
+        if event.widget is not self.root:
+            return
+        self._last_size = (int(event.width), int(event.height))
+
+    def _save_window_size(self) -> None:
+        if not self.settings.remember_window:
+            return
+        width, height = getattr(self, "_last_size", ui_state.DEFAULT_SIZE)
+        try:
+            ui_state.save(WINDOW_FILE, ui_state.WindowSize(width, height))
+        except OSError:
+            pass
 
     def show_window(self) -> None:
         if self.lifecycle.exiting:
@@ -502,6 +634,10 @@ class App:
         )
 
     def request_exit(self) -> None:
+        if self.settings.confirm_before_exit and not self.lifecycle.exiting:
+            if not messagebox.askyesno("退出", "确定退出 FiilPods PC？\n退出后将断开与耳机的连接。"):
+                return
+        self._save_window_size()
         try:
             self._dispatcher.close()
         except Exception:  # noqa: BLE001
@@ -517,10 +653,8 @@ class App:
                 self._rename_current_device(e.text.split("：", 1)[1].strip())
         elif e.kind == "tx":
             self._append("tx", e.clock, "TX  " + e.text)
-            self.rows.append({"time": e.clock, "dir": "TX", "data": e.text, "note": ""})
         elif e.kind == "rx":
             self._append("rx", e.clock, "RX  " + e.text)
-            self.rows.append({"time": e.clock, "dir": "RX", "data": e.text, "note": "notify"})
         elif e.kind == "error":
             self._append("err", e.clock, "!!  " + e.text)
             self.status.set(e.text.splitlines()[0][:160])
@@ -536,6 +670,12 @@ class App:
             )
             if not self.connected and not switching:
                 # 真正的掉线才清空读数；畅连主从互换是预期行为，界面保留旧值避免闪烁
+                self.battery_state = None
+                self.maf_value = None
+                self.ll_value = None
+                self.cinema_value = None
+                self.mp_value = None
+                self.tone_value = None
                 for v in self.bat_vars.values():
                     v.set("--")
                 self.maf_var.set("--")
@@ -575,6 +715,7 @@ class App:
                              "（上次连过的地址已自动预填）。")
         elif e.kind == "battery":
             b = e.payload
+            self.battery_state = b
             if b.single is not None:
                 # 单电池机型（Key Max / Aviator 等 F042·F046 族）：只有一个电池，
                 # 官方源码 F046HomeFragment.setElectricity 只取 payload[1]。
@@ -670,13 +811,15 @@ class App:
             self._parse_line(e.text)
 
     def _append(self, tag: str, clock: str, text: str) -> None:
-        self.txt.insert(tk.END, f"{clock}  {text}\n", tag)
-        if self.chk_autoscroll.get():
-            self.txt.see(tk.END)
+        """写一条日志：先进缓冲（窗口关着也不丢），再同步给设置窗口的日志页。"""
+        direction = "TX" if tag == "tx" else ("RX" if tag == "rx" else "")
+        self.log_store.add(tag, clock, text, direction=direction)
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.append_log(tag, clock, text)
 
     def _parse_line(self, text: str) -> None:
-        self.txt_parse.insert(tk.END, f"{datetime.now():%H:%M:%S}  {text}\n")
-        self.txt_parse.see(tk.END)
+        self._append("parse", f"{datetime.now():%H:%M:%S}", text)
 
     # ------------------------------------------------------------- 动作回调
     def _rename_current_device(self, name: str) -> None:
@@ -865,44 +1008,43 @@ class App:
         )
 
     # ------------------------------------------------------------- 日志导出
+    # 复制/导出/清空现在都在设置窗口的「日志」页上（v1.2.0 把日志整体搬过去），
+    # 主窗口不再持有 Text 控件，所以这里不再有导出动作。
     def _copy_log(self) -> None:
-        self.root.clipboard_clear()
-        self.root.clipboard_append(self.txt.get("1.0", tk.END))
-        self.status.set("已复制全部日志到剪贴板")
+        """兼容旧调用：转发给设置窗口的日志页。"""
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.copy_log()
+            self.status.set("已复制全部日志到剪贴板")
+        else:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.log_store.as_text())
+            self.status.set("已复制全部日志到剪贴板")
 
     def _export_txt(self) -> None:
-        OUT_DIR.mkdir(parents=True, exist_ok=True)
-        path = filedialog.asksaveasfilename(
-            initialdir=str(OUT_DIR),
-            initialfile=f"fiil_log_{datetime.now():%Y%m%d_%H%M%S}.txt",
-            defaultextension=".txt",
-            filetypes=[("文本", "*.txt"), ("全部", "*.*")],
-        )
-        if not path:
-            return
-        Path(path).write_text(self.txt.get("1.0", tk.END), encoding="utf-8")
-        self.status.set(f"已导出 {path}")
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.export_txt(OUT_DIR)
+        else:
+            self._open_settings_and_hint("日志页可以导出 TXT")
 
     def _export_csv(self) -> None:
-        OUT_DIR.mkdir(parents=True, exist_ok=True)
-        path = filedialog.asksaveasfilename(
-            initialdir=str(OUT_DIR),
-            initialfile=f"fiil_log_{datetime.now():%Y%m%d_%H%M%S}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV", "*.csv"), ("全部", "*.*")],
-        )
-        if not path:
-            return
-        with open(path, "w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.DictWriter(fh, fieldnames=["time", "dir", "data", "note"])
-            w.writeheader()
-            w.writerows(self.rows)
-        self.status.set(f"已导出 {path}（{len(self.rows)} 行）")
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.export_csv(OUT_DIR)
+        else:
+            self._open_settings_and_hint("日志页可以导出 CSV")
 
     def _clear_log(self) -> None:
-        self.txt.delete("1.0", tk.END)
-        self.txt_parse.delete("1.0", tk.END)
-        self.rows.clear()
+        self.log_store.clear()
+        win = self.settings_window
+        if win is not None and getattr(win, "win", None) is not None:
+            win.sync_from_store()
+        self.status.set("日志已清空")
+
+    def _open_settings_and_hint(self, what: str) -> None:
+        self.open_settings("日志")
+        self.status.set(what)
 
 
 def main() -> None:
