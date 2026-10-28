@@ -149,10 +149,12 @@ fiil-pods-pc/
 ├── ble_connect.py          # 四段式连接策略（缓存直连 → 地址直连 → 边扫边连 → 兜底）
 ├── fiil_protocol.py        # 协议层：组帧、解析、枚举
 ├── settings.py             # 设置模型：默认值、校验、JSON 落盘
+├── settings_form.py        # 设置表单的字段描述与读写映射
 ├── settings_window.py      # 设置窗口（连接 / 界面 / 日志三页）
 ├── log_store.py            # 有上限的环形日志缓冲
 ├── overview.py             # 主界面状态总览的数据模型
-├── theme.py                # 配色、字体、圆角与状态色
+├── ui_theme.py             # 配色、字体、圆角与状态色
+├── scroll_frame.py         # 可滚动容器（内容超高才出滚动条）
 ├── ui_state.py             # 窗口尺寸持久化
 ├── quick_controls.py       # 托盘与主窗口共用的控制目录 / 菜单模型
 ├── tray_support.py         # 系统托盘后端（pystray + Pillow，延迟导入）
