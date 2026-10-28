@@ -134,3 +134,8 @@ def save(path: Path, settings: Settings) -> None:
 def field_names() -> tuple[str, ...]:
     """当前模型里的全部字段名（界面生成表单时用，避免手写两份列表）。"""
     return tuple(f.name for f in fields(Settings))
+
+
+def field_rules() -> dict[str, tuple[Any, tuple[float, float] | None]]:
+    """字段 → (转换类型, 允许区间)。界面据此决定控件类型与 Spinbox 范围。"""
+    return dict(_FIELD_RULES)
