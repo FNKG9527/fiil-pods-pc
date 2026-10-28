@@ -20,5 +20,5 @@ if (-not (Test-Path $iscc)) { throw '没找到 Inno Setup 6，请先安装 https
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 编译失败' }
 
 Write-Host '[3/3] 完成' -ForegroundColor Green
-Write-Host "  安装包：$root\dist\installer\FiilPodsPC_Setup_1.3.0.exe"
+Write-Host "  安装包：$root\dist\installer\FiilPodsPC_Setup_1.3.1.exe"
 Write-Host "  目录版：$root\dist\FiilPodsPC\FiilPodsPC.exe"

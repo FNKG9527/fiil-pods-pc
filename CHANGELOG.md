@@ -5,6 +5,41 @@
 
 ---
 
+## [1.3.1] - 2026-10-29
+
+修掉「连不上时白白等 28 秒、最后只丢一句 TimeoutError」这个体验缺陷。
+起因是用户反馈耳机连不上，而日志里每次失败都要等近半分钟。
+
+### 修复
+
+**连接失败快速给出原因（`ble_connect.py` / `ble_worker.py`）**
+
+- 定位到真正的时间黑洞：`扫描寻找` 跑满一轮没找到目标后，旧流程还会进
+  `地址兜底`，让 Bleak 把**同一轮扫描再跑一遍**（实测 20 秒），合计 28 秒
+- `_scan_until_found()` 现在额外回报「扫描是否真的跑完」；扫完一轮仍无目标
+  就带原因直接收工，不再进入兜底空转
+- `ConnectResult` 新增机器可读的 `reason`（`not_advertising` / `scan_failed` /
+  `connect_failed`），上层不必再靠匹配错误文案判断失败类型
+- 实机实测：同一场景 **28.15s → 8.22s**
+
+**说清楚为什么连不上（`ble_worker.py`）**
+
+- FIIL 双模耳机被经典蓝牙音频链路占用时会停止 BLE 广播，此时按地址直连
+  必然失败。以前用户只能看到 `TimeoutError`，完全无从下手
+- 新增 `_advertising_hint()`：直接告诉用户「耳机被经典蓝牙占着，请在系统
+  声音里断开它或暂停播放，等 3~5 秒再试」
+- 状态胶囊只放短句 `未连接 · 耳机不在广播`（标题栏宽度有限，长文案会把
+  工具栏挤变形），可操作指引写进日志页与状态栏
+- 这类失败不再补发一句「未连接」覆盖掉原因
+
+### 测试
+
+- 新增 `tests/test_not_advertising.py`（15 项断言，覆盖胶囊文案长度、
+  状态栏与日志内容、`keep_state` 重连路径不误改状态）
+- `test_ble_connect.py` 中 4 个断言旧「扫不到也要走兜底」行为的用例按新契约更新
+
+---
+
 ## [1.3.0] - 2026-10-28
 
 新增 LDAC 高清解码开关，并修掉一处会把左栏内容顶出可视区的横向溢出。
@@ -220,6 +255,8 @@ FIIL+ 3.5.2（`com.fengeek.f002`），jadx 静态分析 + 实机 BLE 抓包。
 
 ---
 
+[1.3.1]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.3.1
+[1.3.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.3.0
 [1.2.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.2.0
 [1.1.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.1.0
 [1.0.0]: https://github.com/FNKG9527/fiil-pods-pc/releases/tag/v1.0.0
