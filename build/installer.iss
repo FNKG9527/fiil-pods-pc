@@ -1,11 +1,11 @@
 ; ============================================================================
 ;  FiilPods PC 探针 — Inno Setup 安装脚本
 ;  编译： "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build\installer.iss
-;  产物： dist\installer\FiilPodsPC_Setup_1.2.0.exe
+;  产物： dist\installer\FiilPodsPC_Setup_1.3.0.exe
 ; ============================================================================
 
 #define MyAppName "FiilPods PC 探针"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "FiilPods PC"
 #define MyAppExeName "FiilPodsPC.exe"
 #define MyAppId "{{8F3C2B1A-6D4E-4A97-9C55-2E7B1D0A4F63}"
@@ -16,7 +16,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion=1.3.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoProductName={#MyAppName}

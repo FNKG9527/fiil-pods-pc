@@ -34,7 +34,7 @@ from tray_support import TrayIcon, build_menu_items, load_tray_backend
 from window_lifecycle import MainThreadDispatcher, WindowLifecycle
 
 APP_TITLE = "FiilPods PC 探针 — FIIL 耳机 BLE 逆向控制台"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 
 def _app_dir() -> Path:
