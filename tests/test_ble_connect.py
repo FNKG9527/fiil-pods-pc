@@ -29,14 +29,19 @@ class FakeClient:
 
 
 class FakeScanner:
-    def __init__(self, callback, device=None, delay=0.0) -> None:
+    def __init__(self, callback, device=None, delay=0.0, fail_start: bool = False) -> None:
         self.callback = callback
         self.device = device
         self.delay = delay
+        self.fail_start = fail_start
         self.started = False
         self.stopped = 0
 
     async def start(self):
+        if self.fail_start:
+            # 后端本身坏了（蓝牙适配器关闭 / WinRT 未初始化）：扫描这一步没跑起来，
+            # 此时「没找到设备」不能当作「设备不在广播」的证据。
+            raise RuntimeError("扫描器不可用")
         self.started = True
 
     async def stop(self):
@@ -122,19 +127,32 @@ def test_direct_address_used_before_scanning_on_windows():
 def test_non_windows_skips_synthetic_device():
     assert supports_direct_address("darwin") is False
     stages: list[str] = []
+    device = FakeDevice("AA:BB:CC:DD:EE:FF")
+
+    def scanner_factory(cb):
+        scanner = FakeScanner(cb)
+
+        async def emit():
+            await asyncio.sleep(0)
+            cb(device, None)
+
+        asyncio.get_running_loop().create_task(emit())
+        return scanner
 
     def factory(target, timeout, callback):
         stages.append(type(target).__name__)
-        return FakeClient(target, timeout, callback)
+        # 合成地址这条 Windows 专用路径不该出现；扫描到的对象也连不上，
+        # 于是走到兜底那一步，用它确认兜底传的是纯字符串。
+        return FakeClient(target, timeout, callback, fail=True)
 
-    result = run(connect_fast(
+    run(connect_fast(
         "AA:BB:CC:DD:EE:FF",
         client_factory=factory,
-        scanner_factory=lambda cb: FakeScanner(cb),
-        scan_timeout=0.1,  # 别真等满 8 秒，测试要快
+        scanner_factory=scanner_factory,
+        scan_timeout=0.2,
         platform="darwin",
     ))
-    assert result.ok
+    assert stages[0] != "BLEDevice"  # 没构造合成地址对象
     assert "str" in stages  # 兜底用的是纯字符串
 
 
@@ -178,13 +196,15 @@ def test_scan_ignores_other_addresses():
 
     result = run(connect_fast(
         "AA:BB:CC:DD:EE:FF",
-        client_factory=lambda t, to, cb: FakeClient(t, to, cb),
+        client_factory=lambda t, to, cb: FakeClient(t, to, cb, fail=True),
         scanner_factory=scanner_factory,
         scan_timeout=0.2,
         platform="darwin",
     ))
-    # 扫描没找到目标 → 走地址兜底并成功
-    assert result.ok and result.stage == "地址兜底"
+    # 只看到别的设备 → 目标不在广播，直接带原因失败，不再兜底空转
+    assert result.ok is False
+    assert result.reason == "not_advertising"
+    assert [a.stage for a in result.attempts] == ["扫描寻找"]
 
 
 def test_all_paths_fail_reports_error_and_timings():
@@ -197,7 +217,8 @@ def test_all_paths_fail_reports_error_and_timings():
     ))
     assert result.ok is False
     assert result.error
-    assert [a.stage for a in result.attempts] == ["地址直连", "扫描寻找", "地址兜底"]
+    # 扫不到目标就不再兜底：省掉的是最后那 20 秒白等
+    assert [a.stage for a in result.attempts] == ["地址直连", "扫描寻找"]
     assert "合计" in result.summary()
 
 
@@ -222,4 +243,79 @@ def test_stage_callback_reports_progress():
         platform="win32",
         on_stage=seen.append,
     ))
-    assert seen == ["地址直连", "扫描寻找", "地址兜底"]
+    assert seen == ["地址直连", "扫描寻找"]
+
+
+# ---------------------------------------------------------------- 失败归因
+# 用户实际遇到的日志：地址直连 0.12s → 扫描寻找 8.04s → 地址兜底 20.00s，合计 28 秒
+# 才弹「连接失败」。慢的不是那 0.12 秒，而是后面两段纯粹的等待：
+#   * 扫了 8 秒没扫到 —— 耳机被经典蓝牙占用时不广播，这 8 秒注定白花；
+#   * 兜底又交给 Bleak 自己扫 20 秒 —— 前面已经在扫了，这里等于重复劳动。
+# 真正有用的信息是「扫描从头到尾没看见这个地址」：它说明耳机不在广播，
+# 应该立刻给出可操作的提示，而不是再等 20 秒。
+
+
+def test_scan_miss_skips_slow_fallback_and_explains_why():
+    """扫不到目标时不要再去兜底空转 20 秒，直接带原因失败。"""
+    result = run(connect_fast(
+        "AA:BB:CC:DD:EE:FF",
+        client_factory=lambda t, to, cb: FakeClient(t, to, cb, fail=True),
+        scanner_factory=lambda cb: FakeScanner(cb),
+        scan_timeout=0.1,
+        connect_timeout=20.0,
+        platform="win32",
+    ))
+    assert result.ok is False
+    # 兜底不再跑：验证记录里没有「地址兜底」
+    assert [a.stage for a in result.attempts] == ["地址直连", "扫描寻找"]
+    # 失败原因要指向真正的问题（不在广播），而不是一句泛泛的 TimeoutError
+    assert result.reason == "not_advertising"
+    assert "广播" in result.error
+
+
+def test_scan_failure_in_backend_does_not_claim_device_is_off():
+    """扫描器自己起不来（适配器关闭）时不能说「耳机没在广播」——那是两码事。"""
+    result = run(connect_fast(
+        "AA:BB:CC:DD:EE:FF",
+        client_factory=lambda t, to, cb: FakeClient(t, to, cb, fail=True),
+        scanner_factory=lambda cb: FakeScanner(cb, fail_start=True),
+        scan_timeout=0.1,
+        connect_timeout=20.0,
+        platform="win32",
+    ))
+    assert result.ok is False
+    assert result.reason == "scan_failed"
+    # 扫描后端坏了要重试兜底那条路，因为它可能是唯一还能用的路径
+    assert [a.stage for a in result.attempts] == ["地址直连", "扫描寻找", "地址兜底"]
+
+
+def test_successful_scan_still_uses_address_fallback_when_connect_fails():
+    """扫到了但连不上：这时兜底有意义（可能是缓存对象陈旧），要保留。"""
+    device = FakeDevice("AA:BB:CC:DD:EE:FF")
+
+    def scanner_factory(cb):
+        scanner = FakeScanner(cb)
+
+        async def emit():
+            await asyncio.sleep(0)
+            cb(device, None)
+
+        asyncio.get_running_loop().create_task(emit())
+        return scanner
+
+    calls: list = []
+
+    def factory(target, timeout, callback):
+        calls.append(target)
+        # 前两次（合成地址 + 扫描到的对象）都失败，兜底那次成功
+        return FakeClient(target, timeout, callback, fail=len(calls) <= 2)
+
+    result = run(connect_fast(
+        "AA:BB:CC:DD:EE:FF",
+        client_factory=factory,
+        scanner_factory=scanner_factory,
+        scan_timeout=0.2,
+        platform="win32",
+    ))
+    assert result.ok and result.stage == "地址兜底"
+    assert [a.stage for a in result.attempts] == ["地址直连", "扫描寻找", "扫描后连接", "地址兜底"]

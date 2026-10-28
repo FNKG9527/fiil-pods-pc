@@ -48,12 +48,23 @@ class ConnectAttempt:
 
 @dataclass
 class ConnectResult:
-    """连接结果。`client` 为 None 表示全部路径都失败，`error` 说明最后一步的原因。"""
+    """连接结果。`client` 为 None 表示全部路径都失败，`error` 说明最后一步的原因。
+
+    `reason` 是给上层做判断用的机器可读失败归因（空串表示成功）：
+
+    * `not_advertising` —— 完整扫了一轮，目标地址始终没出现。双模耳机被经典
+      蓝牙占用时会停止 BLE 广播，这是最常见的一种，提示要写成「耳机不在广播」
+      而不是「超时」。
+    * `scan_failed` —— 扫描器本身起不来（适配器关闭 / WinRT 未就绪）。此时
+      「没扫到」不能当作设备不在广播的证据，还得走兜底那条路。
+    * `connect_failed` —— 扫到了（或直接按地址试过），但每次建连都失败。
+    """
 
     client: Any | None = None
     stage: str = ""
     attempts: list[ConnectAttempt] = field(default_factory=list)
     error: str = ""
+    reason: str = ""
 
     @property
     def ok(self) -> bool:
@@ -172,8 +183,13 @@ async def _scan_until_found(
     *,
     timeout: float,
     scanner_factory: ScannerFactory,
-) -> tuple[Any | None, float, str]:
-    """扫到目标地址就立刻返回，不等满 timeout。"""
+) -> tuple[Any | None, float, str, bool]:
+    """扫到目标地址就立刻返回，不等满 timeout。
+
+    返回 `(device, 耗时, 说明, 扫描是否正常跑完)`。最后那个布尔值用来区分
+    「扫完了但目标不在广播」和「扫描器根本没起来」——这两种情况的后续动作
+    完全不同：前者可以直接收工报原因，后者还得试兜底路径。
+    """
     started = time.perf_counter()
     loop = asyncio.get_running_loop()
     found: asyncio.Future = loop.create_future()
@@ -188,19 +204,28 @@ async def _scan_until_found(
     try:
         await scanner.start()
     except Exception as exc:  # noqa: BLE001
-        return None, time.perf_counter() - started, f"{type(exc).__name__}: {exc}"
+        return None, time.perf_counter() - started, f"{type(exc).__name__}: {exc}", False
     try:
         device = await asyncio.wait_for(found, timeout=timeout)
     except TimeoutError:
-        return None, time.perf_counter() - started, f"{timeout:.0f} 秒内未扫到该地址"
+        return None, time.perf_counter() - started, f"{timeout:.0f} 秒内未扫到该地址", True
     except Exception as exc:  # noqa: BLE001
-        return None, time.perf_counter() - started, f"{type(exc).__name__}: {exc}"
+        return None, time.perf_counter() - started, f"{type(exc).__name__}: {exc}", False
     finally:
         try:
             await scanner.stop()
         except Exception:  # noqa: BLE001
             pass
-    return device, time.perf_counter() - started, ""
+    return device, time.perf_counter() - started, "", True
+
+
+def _advertising_hint(address: str) -> str:
+    """扫不到目标时给用户看的原因：说清楚是什么状况，并给出能做的动作。"""
+    return (
+        f"未发现 {address} 的 BLE 广播。FIIL 双模耳机被经典蓝牙占用（正在放音频）时"
+        "会停止广播，此时按地址直连也会失败。请先把耳机从 Windows 音频设备里断开"
+        "（或关掉正在播放的声音），等 BLE 重新广播后再点连接。"
+    )
 
 
 async def connect_fast(
@@ -261,7 +286,7 @@ async def connect_fast(
 
     # 3) 边扫边连：一发现就停扫
     note("扫描寻找")
-    device, seconds, detail = await _scan_until_found(
+    device, seconds, detail, scan_ran = await _scan_until_found(
         address, timeout=scan_timeout, scanner_factory=scanner_factory
     )
     if device is not None:
@@ -283,8 +308,16 @@ async def connect_fast(
     else:
         result.attempts.append(ConnectAttempt("扫描寻找", seconds, False, detail))
         result.error = detail
+        if scan_ran:
+            # 扫描跑完了一整轮，目标地址依然没出现 —— 这就已经是最终答案了。
+            # 再交给 Bleak 兜底只会把同一轮扫描重跑一遍（实测又是 20 秒），
+            # 用户看到的「28 秒后才报错」就是这么来的。
+            result.reason = "not_advertising"
+            result.error = _advertising_hint(address)
+            return result
 
-    # 4) 地址兜底：交给 Bleak 自己处理（其他平台或不支持合成对象的后端）
+    # 4) 地址兜底：交给 Bleak 自己处理（其他平台或不支持合成对象的后端，
+    #    以及扫到了却连不上、或扫描器根本没起来的情况）
     note("地址兜底")
     client, attempt = await _try_connect(
         address,
@@ -298,4 +331,5 @@ async def connect_fast(
         result.client, result.stage = client, "地址兜底"
         return result
     result.error = attempt.detail or result.error
+    result.reason = result.reason or ("connect_failed" if device is not None else "scan_failed")
     return result

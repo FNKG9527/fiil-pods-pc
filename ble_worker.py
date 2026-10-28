@@ -433,9 +433,20 @@ class BleWorker(threading.Thread):
         if client is None:
             self._emit("error", f"连接失败：{result.error}")
             self._emit("log", f"[!] 连接耗时明细：{result.summary()}")
+            if result.reason == "not_advertising":
+                # 最需要被看见的一种失败：耳机被经典蓝牙占着，BLE 根本不广播。
+                # 胶囊位只放得下短句，可操作的指引交给状态栏和日志页。
+                self._emit("state", "未连接 · 耳机不在广播")
+                self._emit(
+                    "log",
+                    "[!] 提示：耳机此时正走经典蓝牙音频链路。Windows 会占用它，"
+                    "导致 BLE 侧一片静默；请先在系统声音里断开该耳机或暂停播放，"
+                    "等 3~5 秒后重试。",
+                )
             if not keep_state:
                 self._emit("conn", "未连接", {"connected": False})
-                self._emit("state", "未连接")
+                if result.reason != "not_advertising":
+                    self._emit("state", "未连接")
             return False
         self._emit("log", f"[+] 连接路径：{result.stage}，{result.summary()}")
 
