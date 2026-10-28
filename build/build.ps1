@@ -1,4 +1,4 @@
-﻿# 一键重新打包（PowerShell）
+# 一键重新打包（PowerShell）
 # 用法：  powershell -ExecutionPolicy Bypass -File build\build.ps1
 # 前置：  pip install pyinstaller  +  安装 Inno Setup 6
 $ErrorActionPreference = 'Stop'
@@ -20,5 +20,5 @@ if (-not (Test-Path $iscc)) { throw '没找到 Inno Setup 6，请先安装 https
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 编译失败' }
 
 Write-Host '[3/3] 完成' -ForegroundColor Green
-Write-Host "  安装包：$root\dist\installer\FiilPodsPC_Setup_1.2.0.exe"
+Write-Host "  安装包：$root\dist\installer\FiilPodsPC_Setup_1.3.0.exe"
 Write-Host "  目录版：$root\dist\FiilPodsPC\FiilPodsPC.exe"
