@@ -98,7 +98,7 @@ pip install pyinstaller
 powershell -ExecutionPolicy Bypass -File build\build.ps1
 ```
 
-产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.3.1.exe`（安装包）。
+产物：`dist\FiilPodsPC\`（目录版）、`dist\installer\FiilPodsPC_Setup_1.4.0.exe`（安装包）。
 
 ---
 

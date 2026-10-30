@@ -43,8 +43,12 @@ class SettingsWindow:
 
         self.win = tk.Toplevel(root)
         self.win.title("设置 — FiilPods PC")
-        self.win.geometry("900x680")
-        self.win.minsize(760, 560)
+        # 尺寸按内容实测来定：三个设置页里最宽的是「连接」页 632px、最高的是「日志」页
+        # 435px，整个 Notebook 自然尺寸 712x463；加上 v1.4.0 新增的 40px 深色标题条与
+        # 2px 分隔线后，整窗自然尺寸 732x552。原来写死的 900x680 会左右各空 84px、
+        # 上下各空 82px，看着又大又空。
+        self.win.geometry("760x572")
+        self.win.minsize(730, 540)
         self.win.transient(root)
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
         self.win.configure(bg=theme.color("bg"))
@@ -58,16 +62,29 @@ class SettingsWindow:
 
     # ---------------------------------------------------------------- 构建
     def _build(self) -> None:
+        # 顶部标题条：与主窗口同款的深色带，让两个窗口看起来是同一个软件
+        head = tk.Frame(self.win, bg=theme.color("header_bg"))
+        head.pack(fill=tk.X, side=tk.TOP)
+        inner = tk.Frame(head, bg=theme.color("header_bg"))
+        inner.pack(fill=tk.X, padx=theme.SPACE["xl"], pady=theme.SPACE["md"])
+        tk.Label(inner, text="设置", bg=theme.color("header_bg"),
+                 fg=theme.color("header_text"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_BRAND, "bold")).pack(side=tk.LEFT)
+        tk.Label(inner, text="  连接 · 界面 · 行为 · 日志", bg=theme.color("header_bg"),
+                 fg=theme.color("header_muted"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(side=tk.LEFT)
+        tk.Frame(self.win, bg=theme.color("accent"), height=2).pack(fill=tk.X, side=tk.TOP)
+
         outer = ttk.Frame(self.win, padding=0)
         outer.pack(fill=tk.BOTH, expand=True)
 
         self.nb = ttk.Notebook(outer)
-        self.nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
+        self.nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=(8, 0))
 
         self._build_settings_tabs(self.nb)
         self._build_log_tab(self.nb)
 
-        bar = ttk.Frame(outer, padding=(10, 8))
+        bar = ttk.Frame(outer, padding=(10, 6))
         bar.pack(fill=tk.X)
         ttk.Button(bar, text="恢复默认", command=self._on_reset).pack(side=tk.LEFT)
         ttk.Button(bar, text="取消", command=self._on_cancel).pack(side=tk.RIGHT, padx=(6, 0))

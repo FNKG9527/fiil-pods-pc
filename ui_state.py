@@ -11,9 +11,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-#: 默认窗口尺寸与最小尺寸
-DEFAULT_SIZE = (1280, 820)
-MIN_SIZE = (1080, 700)
+#: 默认窗口尺寸与最小尺寸。
+#:
+#: v1.4.0：原来 1280x820 / 最小 1080x700，在 1366x768 的笔记本上默认窗口比屏幕
+#: 还高（768 减去任务栏约 40px，只剩 728），标题栏直接被顶出屏幕。
+#: 压到 1120x720 后能在 1366x768 上完整显示；最小高度 620 让用户还能继续缩。
+DEFAULT_SIZE = (1120, 720)
+MIN_SIZE = (940, 620)
 MAX_SIZE = (6000, 4000)
 
 

@@ -34,7 +34,7 @@ from tray_support import TrayIcon, build_menu_items, load_tray_backend
 from window_lifecycle import MainThreadDispatcher, WindowLifecycle
 
 APP_TITLE = "FiilPods PC 探针 — FIIL 耳机 BLE 逆向控制台"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 
 
 def _app_dir() -> Path:
@@ -147,60 +147,22 @@ class App:
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
-        pad = {"padx": 8, "pady": 6}
+        # v1.4.0 布局：深色品牌条 + 紧凑连接条 + 左右双栏。
+        # 原来是三层 LabelFrame（"① 设备连接" 带边框 + 两行控件）占 93px，
+        # 现在合成一条 34px 的品牌条和一条 32px 的连接行，省下 27px 给内容区。
+        pad = {"padx": theme.SPACE["lg"], "pady": theme.SPACE["md"]}
 
-        # ---- 顶部：连接条 ----
-        top = ttk.LabelFrame(self.root, text="① 设备连接")
-        top.pack(fill=tk.X, **pad)
-
-        row = ttk.Frame(top)
-        row.pack(fill=tk.X, padx=8, pady=6)
-
-        ttk.Button(row, text="扫描设备", command=self._on_scan, width=11).pack(side=tk.LEFT)
-        self.cmb_dev = ttk.Combobox(row, width=44, state="readonly")
-        self.cmb_dev.pack(side=tk.LEFT, padx=8)
-        self.btn_conn = ttk.Button(row, text="连接", command=self._on_connect, width=8)
-        self.btn_conn.pack(side=tk.LEFT)
-        ttk.Button(row, text="断开", command=self._on_disconnect, width=8).pack(side=tk.LEFT, padx=4)
-
-        # 状态胶囊：用 Label 模拟，避免 ttk 主题下 Button 无法着色的限制
-        self.lbl_state = tk.Label(row, text="未连接", fg="white", bg=theme.color("idle"),
-                                  padx=10, pady=2, font=(theme.FONT_UI, 9, "bold"))
-        self.lbl_state.pack(side=tk.LEFT, padx=(10, 4))
-
-        # 右侧动作按钮：设置 / 后台 / 退出
-        ttk.Button(row, text="退出程序", command=self.request_exit,
-                   width=9).pack(side=tk.RIGHT)
-        ttk.Button(row, text="后台运行", command=self.hide_to_tray,
-                   width=9).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(row, text="⚙ 设置", command=self.open_settings,
-                   width=9).pack(side=tk.RIGHT)
-
-        # ---- 直连地址（扫描不到时的逃生通道）----
-        # 实测：FIIL 双模耳机被经典蓝牙占用时不再发 BLE 广播，扫描列表里根本没有它。
-        # 但它仍然可以用 BLE 地址直连，所以留一个手填入口，不用等广播。
-        row2 = ttk.Frame(top)
-        row2.pack(fill=tk.X, padx=8, pady=(0, 6))
-        ttk.Label(row2, text="直连地址：").pack(side=tk.LEFT)
-        self.var_addr = tk.StringVar(value="")
-        ttk.Entry(row2, textvariable=self.var_addr, width=22).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(row2, text="按地址连接", command=self._on_connect_addr,
-                   width=11).pack(side=tk.LEFT)
-        ttk.Label(
-            row2,
-            text="（耳机不出现在扫描列表时用；上次连过的地址会自动记住）",
-            foreground=theme.color("muted"),
-        ).pack(side=tk.LEFT, padx=8)
+        self._build_header()
+        self._build_connect_bar()
 
         # ---- 主体：左控制 / 右状态总览 ----
         body = ttk.Frame(self.root)
         body.pack(fill=tk.BOTH, expand=True, **pad)
 
-        left = ScrollFrame(body, width=470)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
-        # 左栏 7 个面板自然高度合计约 1033px，1280x820 窗口只分得到约 682px。
-        # 直接 pack 会把底部面板压扁到看不见（实测 ⑦ 只剩 45px、⑧ 高度 0），
-        # 所以套一层滚动容器：放得下时无滚动条，放不下时出现竖向滚动条。
+        left = ScrollFrame(body, width=theme.LEFT_PANE_WIDTH)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, theme.SPACE["lg"]))
+        # 左栏 7 个面板堆起来仍会超过窗口高度，套滚动容器：
+        # 放得下时无滚动条，放不下时出现竖向滚动条（v1.3.x 已如此，保留）。
         left.pack_propagate(False)
         self.left_scroll = left
 
@@ -212,46 +174,190 @@ class App:
 
         # ---- 底部状态栏 ----
         self.status = tk.StringVar(value="就绪。先点「扫描设备」，选中 FIIL 耳机后连接。")
-        bar = ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor=tk.W)
+        bar = tk.Label(self.root, textvariable=self.status, anchor=tk.W,
+                       bg=theme.color("surface"), fg=theme.color("muted"),
+                       font=(theme.FONT_UI, theme.FONT_SIZE_SMALL),
+                       padx=theme.SPACE["lg"], pady=theme.SPACE["sm"],
+                       highlightthickness=1, highlightbackground=theme.color("border_soft"))
         bar.pack(fill=tk.X, side=tk.BOTTOM)
 
-    def _build_left(self, parent: ttk.Frame) -> None:
-        # ---- ② 电量 ----
-        box_bat = ttk.LabelFrame(parent, text="② 电量（实机读回）")
-        box_bat.pack(fill=tk.X, pady=(0, 6))
+    def _build_header(self) -> None:
+        """深色品牌条：给界面一个视觉锚点，也是「素」的主要解药。"""
+        head = tk.Frame(self.root, bg=theme.color("header_bg"))
+        head.pack(fill=tk.X, side=tk.TOP)
 
-        grid = ttk.Frame(box_bat)
-        grid.pack(fill=tk.X, padx=8, pady=6)
-        # 竖排卡片（标签在上、数值在下）而不是「标签 数值 标签 数值」横排：
-        # 横排时 3 组在 450px 宽度里放不下，第三组的数字会被父容器裁掉。
+        inner = tk.Frame(head, bg=theme.color("header_bg"))
+        inner.pack(fill=tk.X, padx=theme.SPACE["xl"], pady=theme.SPACE["md"])
+
+        tk.Label(inner, text="FIIL", bg=theme.color("header_bg"),
+                 fg=theme.color("header_text"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_BRAND, "bold")).pack(side=tk.LEFT)
+        tk.Label(inner, text="  蓝牙控制台", bg=theme.color("header_bg"),
+                 fg=theme.color("header_muted"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_BASE)).pack(side=tk.LEFT)
+        tk.Label(inner, text=f"v{APP_VERSION}", bg=theme.color("header_bg"),
+                 fg=theme.color("header_muted"),
+                 font=(theme.FONT_MONO, theme.FONT_SIZE_SMALL)).pack(side=tk.LEFT,
+                                                                   padx=(theme.SPACE["md"], 0))
+
+        # 右侧动作按钮：挂在深色条上，主区域就不再被三个按钮占一行
+        for text, cmd, padx in (
+            ("退出", self.request_exit, (theme.SPACE["sm"], 0)),
+            ("后台运行", self.hide_to_tray, (theme.SPACE["sm"], 0)),
+            ("⚙ 设置", self.open_settings, (0, 0)),
+        ):
+            tk.Button(
+                inner, text=text, command=cmd,
+                bg=theme.color("header_bg"), fg=theme.color("header_muted"),
+                activebackground=theme.color("accent"),
+                activeforeground=theme.color("header_text"),
+                relief=tk.FLAT, borderwidth=0, highlightthickness=0,
+                font=(theme.FONT_UI, theme.FONT_SIZE_BASE),
+                padx=theme.SPACE["md"], pady=theme.SPACE["xs"], cursor="hand2",
+            ).pack(side=tk.RIGHT, padx=padx)
+
+        # 分离线：深色条与浅色主体之间的一道细边
+        tk.Frame(self.root, bg=theme.color("accent"), height=2).pack(fill=tk.X)
+
+    def _build_connect_bar(self) -> None:
+        """设备连接条：扫描 / 选择 / 连接 / 状态胶囊 + 直连地址。"""
+        bar = tk.Frame(self.root, bg=theme.color("card"),
+                       highlightthickness=1, highlightbackground=theme.color("border_soft"))
+        bar.pack(fill=tk.X, padx=theme.SPACE["lg"], pady=(theme.SPACE["md"], theme.SPACE["sm"]))
+
+        row = ttk.Frame(bar)
+        row.pack(fill=tk.X, padx=theme.SPACE["md"], pady=theme.SPACE["sm"])
+
+        ttk.Button(row, text="扫描设备", command=self._on_scan, width=9).pack(side=tk.LEFT)
+        self.cmb_dev = ttk.Combobox(row, width=40, state="readonly",
+                                    font=(theme.FONT_UI, theme.FONT_SIZE_BASE))
+        self.cmb_dev.pack(side=tk.LEFT, padx=theme.SPACE["md"])
+        self.btn_conn = ttk.Button(row, text="连接", command=self._on_connect, width=6)
+        self.btn_conn.pack(side=tk.LEFT)
+        ttk.Button(row, text="断开", command=self._on_disconnect, width=6).pack(
+            side=tk.LEFT, padx=theme.SPACE["sm"])
+
+        # 状态胶囊：用 Label 模拟，避免 ttk 主题下 Button 无法着色的限制
+        self.lbl_state = tk.Label(row, text="未连接", fg=theme.color("header_text"),
+                                  bg=theme.color("idle"),
+                                  padx=theme.SPACE["lg"], pady=theme.SPACE["xs"],
+                                  font=(theme.FONT_UI, theme.FONT_SIZE_BASE, "bold"))
+        self.lbl_state.pack(side=tk.LEFT, padx=(theme.SPACE["md"], 0))
+
+        # ---- 直连地址（扫描不到时的逃生通道）----
+        # 实测：FIIL 双模耳机被经典蓝牙占用时不再发 BLE 广播，扫描列表里根本没有它。
+        # 但它仍然可以用 BLE 地址直连，所以留一个手填入口，不用等广播。
+        row2 = ttk.Frame(bar)
+        row2.pack(fill=tk.X, padx=theme.SPACE["md"], pady=(0, theme.SPACE["sm"]))
+        ttk.Label(row2, text="直连地址", foreground=theme.color("muted")).pack(side=tk.LEFT)
+        self.var_addr = tk.StringVar(value="")
+        ttk.Entry(row2, textvariable=self.var_addr, width=20,
+                  font=(theme.FONT_MONO, theme.FONT_SIZE_BASE)).pack(
+            side=tk.LEFT, padx=(theme.SPACE["sm"], theme.SPACE["sm"]))
+        ttk.Button(row2, text="按地址连接", command=self._on_connect_addr,
+                   width=10).pack(side=tk.LEFT)
+        ttk.Label(
+            row2,
+            text="耳机不出现在扫描列表时用；上次连过的地址会自动记住",
+            foreground=theme.color("faint"),
+            font=(theme.FONT_UI, theme.FONT_SIZE_SMALL),
+        ).pack(side=tk.LEFT, padx=theme.SPACE["md"])
+
+    def _card(self, parent: Any, title: str, tone: str = "accent") -> tk.Frame:
+        """建一张带左侧色条的白底卡片，返回放控件的内容区。
+
+        为什么不用 ttk.LabelFrame：Windows 的 vista 主题给 LabelFrame 画的是
+        带凹槽的方框，七个一模一样的灰框叠在一起就是「素」的观感来源。
+        换成白底卡片 + 彩色竖条后，每张卡片有语义色（电量=绿、降噪=蓝、低延迟=橙、
+        原始数据=灰），视觉上能一眼分区，内边距也能自己控，比 LabelFrame 省 8~10px。
+        """
+        card = tk.Frame(parent, bg=theme.color("card"),
+                        highlightthickness=1, highlightbackground=theme.color("border_soft"))
+        card.pack(fill=tk.X, pady=(0, theme.PANEL_GAP))
+
+        tk.Frame(card, bg=theme.color(tone), width=3).pack(side=tk.LEFT, fill=tk.Y)
+
+        inner = tk.Frame(card, bg=theme.color("card"))
+        inner.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                   padx=theme.PANEL_PADX, pady=theme.PANEL_PADY)
+
+        head = tk.Frame(inner, bg=theme.color("card"))
+        head.pack(fill=tk.X, pady=(0, theme.SPACE["sm"]))
+        tk.Label(head, text=title, bg=theme.color("card"), fg=theme.color("text"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_TITLE, "bold"),
+                 anchor=tk.W).pack(side=tk.LEFT)
+        #: 卡片标题行右侧的挂载点，供需要额外按钮的卡片使用
+        self._card_head = head
+
+        body = tk.Frame(inner, bg=theme.color("card"))
+        body.pack(fill=tk.X)
+        return body
+
+    def _note(self, parent: Any, text: str, tone: str = "faint",
+              wrap: int | None = None) -> None:
+        """卡片脚注：小字、淡色、自动换行。
+
+        wrap 默认按左栏宽度算；右栏的卡片宽得多，传 None 会让脚注被折得很窄、
+        右边留一大片空白，所以铺在右栏时要显式给更大的 wraplength。
+        """
+        tk.Label(parent, text=text, bg=theme.color("card"), fg=theme.color(tone),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL),
+                 justify=tk.LEFT, anchor=tk.W,
+                 wraplength=wrap if wrap is not None else theme.LEFT_PANE_WIDTH - 46).pack(
+            fill=tk.X, pady=(theme.SPACE["sm"], 0))
+
+    def _readback(self, parent: Any, var: tk.StringVar) -> None:
+        """「读回 xx」小标签组，颜色用品牌蓝。"""
+        tk.Label(parent, text="读回", bg=theme.color("card"), fg=theme.color("faint"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(
+            side=tk.LEFT, padx=(theme.SPACE["md"], theme.SPACE["xs"]))
+        tk.Label(parent, textvariable=var, bg=theme.color("card"),
+                 fg=theme.color("accent"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_BASE, "bold")).pack(side=tk.LEFT)
+
+    def _build_left(self, parent: ttk.Frame) -> None:
+        # ---- 电量 ----
+        body = self._card(parent, "电量", "ok")
+        ttk.Button(self._card_head, text="刷新", width=5,
+                   command=self._on_refresh_all).pack(side=tk.RIGHT)
+
+        grid = tk.Frame(body, bg=theme.color("card"))
+        grid.pack(fill=tk.X)
+        # 竖排（标签在上、数值在下）而不是「标签 数值 标签 数值」横排：
+        # 横排时 3 组在 430px 宽度里放不下，第三组的数字会被父容器裁掉。
         for col in range(3):
             grid.columnconfigure(col, weight=1, uniform="bat")
 
         self.bat_vars = {}
         self.bat_labels = {}
+        self.bat_bars: dict[str, tk.Canvas] = {}
         for i, (key, label) in enumerate((("left", "左耳"), ("right", "右耳"), ("case", "充电盒"))):
-            cell = ttk.Frame(grid)
-            cell.grid(row=0, column=i, sticky="nsew", padx=2)
-            lbl = ttk.Label(cell, text=label, foreground=theme.color("muted"),
-                            font=(theme.FONT_UI, 9))
-            lbl.pack(anchor=tk.W)
+            cell = tk.Frame(grid, bg=theme.color("card"))
+            cell.grid(row=0, column=i, sticky="nsew", padx=(0, theme.SPACE["sm"]))
+            lbl = tk.Label(cell, text=label, bg=theme.color("card"),
+                           fg=theme.color("muted"),
+                           font=(theme.FONT_UI, theme.FONT_SIZE_SMALL), anchor=tk.W)
+            lbl.pack(fill=tk.X)
             self.bat_labels[key] = lbl
             v = tk.StringVar(value="--")
             self.bat_vars[key] = v
-            ttk.Label(cell, textvariable=v, font=(theme.FONT_UI, 18, "bold"),
-                      foreground=theme.color("ok")).pack(anchor=tk.W)
+            tk.Label(cell, textvariable=v, bg=theme.color("card"),
+                     fg=theme.color("ok"), font=theme.value_font(),
+                     anchor=tk.W).pack(fill=tk.X)
+            # 数值旁边配一条 4px 的进度条：纯数字太「素」，一根彩色细条能把
+            # 「电量」这个读数变成一眼可扫的图形。Canvas 自绘是因为 ttk.Progressbar
+            # 在 vista 主题下强制 20px 高且带边框，压不到这么薄。
+            bar = tk.Canvas(cell, height=4, bg=theme.color("card_alt"),
+                            highlightthickness=0, bd=0)
+            bar.pack(fill=tk.X, pady=(theme.SPACE["xs"], 0))
+            self.bat_bars[key] = bar
 
-        ttk.Button(box_bat, text="刷新电量 / 全部状态", command=self._on_refresh_all).pack(
-            fill=tk.X, padx=8, pady=(0, 8))
-
-        # ---- ③ MAF ----
-        box_maf = ttk.LabelFrame(parent, text="③ 降噪模式 MAF（写后读回确认）")
-        box_maf.pack(fill=tk.X, pady=(0, 6))
+        # ---- 降噪模式 MAF ----
+        body = self._card(parent, "降噪模式 MAF", "accent")
+        btn_row = tk.Frame(body, bg=theme.color("card"))
+        btn_row.pack(fill=tk.X)
 
         self.maf_var = tk.StringVar(value="--")
-        wrap = ttk.Frame(box_maf)
-        wrap.pack(fill=tk.X, padx=8, pady=6)
-
         # 五档全部实机验证（exp_maf_five.py → docs/evidence/maf_five_20261025.txt）：
         # 逐档 SET 0→4，ACK 均成功，@3.0s 读回均等于写入值。
         # 文案用 FIIL+ 原文（关闭/降噪/开放/兼听/风中），不用「监听/自适应」等外部叫法。
@@ -262,182 +368,91 @@ class App:
             (MafMode.LISTEN, "兼听"),
             (MafMode.WIND, "风中"),
         ]
-        btn_row = ttk.Frame(wrap)
-        btn_row.pack(fill=tk.X)
         for m, label in modes:
-            ttk.Button(btn_row, text=label, width=7,
-                       command=lambda mm=m: self._on_set_maf(mm)).pack(side=tk.LEFT, padx=1)
+            ttk.Button(btn_row, text=label, width=6,
+                       command=lambda mm=m: self._on_set_maf(mm)).pack(
+                side=tk.LEFT, padx=(0, theme.SPACE["xs"]))
+        self._readback(btn_row, self.maf_var)
 
-        ttk.Label(wrap, text="当前读回：").pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Label(wrap, textvariable=self.maf_var, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
+        self._note(body, "五档均已实测通过，切换约 2s 生效。")
 
-        ttk.Label(box_maf, foreground=theme.color("warn"), wraplength=440, justify=tk.LEFT,
-                  text="注：五档全部实机验证通过（SET 0→4 逐档 ACK 成功、读回一致）。"
-                       "模式切换约 1.75~2.0s 才生效，本程序在 2.2s 后读回判定，"
-                       "此前显示「未确认」属正常。").pack(
-                          fill=tk.X, padx=8, pady=(0, 8))
-
-        # ---- ④ 影院 ----
-        box_cin = ttk.LabelFrame(parent, text="④ 影院模式（空间音频）")
-        box_cin.pack(fill=tk.X, pady=(0, 6))
-        crow = ttk.Frame(box_cin)
-        crow.pack(fill=tk.X, padx=8, pady=8)
+        # ---- 模式开关（影院 / 畅连 / LDAC 三个独立开关并作一行一组）----
+        # 三者都是「勾选框 + 读回值」的同构结构，分三张卡片会各多出 30px 标题与
+        # 内边距；合并成一张卡后省下约 90px 竖向空间，语义上也确实同属「开关类」。
+        body = self._card(parent, "模式开关", "accent")
 
         self.cinema_on = tk.BooleanVar(value=False)
-        self.chk_cinema = ttk.Checkbutton(crow, text="开启影院模式", variable=self.cinema_on,
+        self.cinema_state = tk.StringVar(value="--")
+        crow = tk.Frame(body, bg=theme.color("card"))
+        crow.pack(fill=tk.X)
+        self.chk_cinema = ttk.Checkbutton(crow, text="影院模式", variable=self.cinema_on,
                                           command=self._on_set_cinema)
         self.chk_cinema.pack(side=tk.LEFT)
-        self.cinema_state = tk.StringVar(value="--")
-        ttk.Label(crow, text="读回：").pack(side=tk.LEFT, padx=(16, 2))
-        ttk.Label(crow, textvariable=self.cinema_state, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
+        self._readback(crow, self.cinema_state)
 
-        # ---- ⑤ 低延迟 ----
-        box_ll = ttk.LabelFrame(parent, text="⑤ 低延迟模式")
-        box_ll.pack(fill=tk.X, pady=(0, 6))
-        lrow = ttk.Frame(box_ll)
-        lrow.pack(fill=tk.X, padx=8, pady=(8, 2))
+        self.mp_on = tk.BooleanVar(value=False)
+        self.mp_state = tk.StringVar(value="--")
+        mrow = tk.Frame(body, bg=theme.color("card"))
+        mrow.pack(fill=tk.X, pady=(theme.SPACE["xs"], 0))
+        self.chk_mp = ttk.Checkbutton(mrow, text="蓝牙畅连", variable=self.mp_on,
+                                      command=self._on_set_multipoint)
+        self.chk_mp.pack(side=tk.LEFT)
+        self._readback(mrow, self.mp_state)
+
+        self.ldac_on = tk.BooleanVar(value=False)
+        self.ldac_state = tk.StringVar(value="--")
+        drow = tk.Frame(body, bg=theme.color("card"))
+        drow.pack(fill=tk.X, pady=(theme.SPACE["xs"], 0))
+        self.chk_ldac = ttk.Checkbutton(drow, text="LDAC 高清", variable=self.ldac_on,
+                                        command=self._on_set_ldac)
+        self.chk_ldac.pack(side=tk.LEFT)
+        self._readback(drow, self.ldac_state)
+
+        # LDAC 未激活时的告警行：平时是空字符串，不占高度（pack_forget 会被反复触发，
+        # 用空文本更省事，两行说明的空 Label 在紧凑布局里也就 2px）
+        self.ldac_lock_var = tk.StringVar(value="")
+        self.lbl_ldac_lock = tk.Label(
+            body, textvariable=self.ldac_lock_var, bg=theme.color("card_alt"),
+            fg=theme.color("warn"), font=(theme.FONT_UI, theme.FONT_SIZE_SMALL),
+            justify=tk.LEFT, anchor=tk.W,
+            wraplength=theme.LEFT_PANE_WIDTH - 60,
+            padx=theme.SPACE["sm"], pady=theme.SPACE["xs"])
+        self.lbl_ldac_lock.pack(fill=tk.X, pady=(theme.SPACE["sm"], 0))
+
+        self._note(body, "畅连切换会断链 10~20s 后自动重连；LDAC 需先在手机 App 激活，"
+                         "与低延迟互斥。")
+
+        # ---- 低延迟 ----
+        body = self._card(parent, "低延迟模式", "warn")
+        lrow = tk.Frame(body, bg=theme.color("card"))
+        lrow.pack(fill=tk.X)
 
         self.ll_var = tk.StringVar(value="--")
         self.ll_btns: dict[int, ttk.Button] = {}
         # Mate 机型（含本机 Key Max）只有 0=关闭 / 1=开启两档 —— 实测 SET 2/3 被耳机拒绝。
         # 按钮先按 Mate 两档建；若读回出现 2/3（说明是 GAIA 机型）再动态补上音乐/视频。
         for val, label in ((0, "关闭"), (1, "开启（游戏）")):
-            b = ttk.Button(lrow, text=label, width=13,
+            b = ttk.Button(lrow, text=label, width=11,
                            command=lambda v=val: self._on_set_low_latency(v))
-            b.pack(side=tk.LEFT, padx=2)
+            b.pack(side=tk.LEFT, padx=(0, theme.SPACE["xs"]))
             self.ll_btns[val] = b
-        ttk.Label(lrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(lrow, textvariable=self.ll_var, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
+        self._readback(lrow, self.ll_var)
 
-        ttk.Label(box_ll, foreground=theme.color("warn"), wraplength=430, justify=tk.LEFT,
-                  text="机型说明：Mate 机型（Key Max 等）只支持「关闭 / 开启」两档，"
-                       "下发 音乐/视频 时耳机会在 ACK 里明确拒绝（payload=01），不是延迟没生效。"
-                       "GAIA 老机型才有四档，读到 2/3 时会自动补出「音乐 / 视频」按钮。").pack(
-                          fill=tk.X, padx=8, pady=(2, 8))
+        self._note(body, "Mate 机型只有两档，下发音乐/视频会被 ACK 拒绝（不是没生效）。", "warn")
 
-        # ---- ⑥ 蓝牙畅连 + 语音提示音量 ----
-        box_mp = ttk.LabelFrame(parent, text="⑥ 蓝牙畅连（多点连接）与语音提示音量")
-        box_mp.pack(fill=tk.X, pady=(0, 6))
-
-        mrow = ttk.Frame(box_mp)
-        mrow.pack(fill=tk.X, padx=8, pady=(8, 2))
-        self.mp_on = tk.BooleanVar(value=False)
-        self.chk_mp = ttk.Checkbutton(mrow, text="开启蓝牙畅连（同时连两台设备）",
-                                      variable=self.mp_on, command=self._on_set_multipoint)
-        self.chk_mp.pack(side=tk.LEFT)
-        self.mp_state = tk.StringVar(value="--")
-        ttk.Label(mrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(mrow, textvariable=self.mp_state, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
-
-        trow = ttk.Frame(box_mp)
-        trow.pack(fill=tk.X, padx=8, pady=(6, 2))
-        ttk.Label(trow, text="语音提示音量：").pack(side=tk.LEFT)
+        # ---- 语音提示音量 ----
+        body = self._card(parent, "语音提示音量", "accent")
+        trow = tk.Frame(body, bg=theme.color("card"))
+        trow.pack(fill=tk.X)
         self.tone_var = tk.StringVar(value="--")
         self.tone_btns: dict[int, ttk.Button] = {}
         # 线值反序：0=高 / 1=中 / 2=低 / 3=静音（FIIL 原文 f43_select_operate_volume）
-        # 按钮宽度压到 8：450px 的行里要塞下 4 个按钮 + 两段说明文字，
-        # 用 width=9 时整行需要 470px，末尾的读回值会被父容器裁掉 20px。
-        for val, label in ((0, "音量高"), (1, "音量中"), (2, "音量低"), (3, "静音")):
-            b = ttk.Button(trow, text=label, width=8,
+        for val, label in ((0, "高"), (1, "中"), (2, "低"), (3, "静音")):
+            b = ttk.Button(trow, text=label, width=6,
                            command=lambda v=val: self._on_set_tone(v))
-            b.pack(side=tk.LEFT, padx=1)
+            b.pack(side=tk.LEFT, padx=(0, theme.SPACE["xs"]))
             self.tone_btns[val] = b
-        ttk.Label(trow, text="读回：").pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Label(trow, textvariable=self.tone_var, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
-
-        ttk.Label(box_mp, foreground=theme.color("warn"), wraplength=430, justify=tk.LEFT,
-                  text="⚠ 畅连切换（开或关）时，耳机固件会立刻断开 BLE 链路并互换主从角色。"
-                       "这是耳机自身行为，无法避免；程序会自动等待并重连（约 10~20 秒），"
-                       "重连成功后自动重读全部状态。").pack(fill=tk.X, padx=8, pady=(2, 8))
-
-        # ---- ⑥b LDAC 高清解码 ----
-        box_ldac = ttk.LabelFrame(parent, text="⑥b LDAC 高清解码（990kbps 高码率）")
-        box_ldac.pack(fill=tk.X, pady=(0, 6))
-        lrow = ttk.Frame(box_ldac)
-        lrow.pack(fill=tk.X, padx=8, pady=(8, 2))
-
-        self.ldac_on = tk.BooleanVar(value=False)
-        self.chk_ldac = ttk.Checkbutton(lrow, text="开启 LDAC", variable=self.ldac_on,
-                                        command=self._on_set_ldac)
-        self.chk_ldac.pack(side=tk.LEFT)
-        self.ldac_state = tk.StringVar(value="--")
-        ttk.Label(lrow, text="读回：").pack(side=tk.LEFT, padx=(14, 2))
-        ttk.Label(lrow, textvariable=self.ldac_state, font=(theme.FONT_UI, 11, "bold"),
-                  foreground=theme.color("accent")).pack(side=tk.LEFT)
-
-        self.ldac_lock_var = tk.StringVar(value="")
-        ttk.Label(box_ldac, textvariable=self.ldac_lock_var, foreground=theme.color("warn"),
-                  wraplength=430, justify=tk.LEFT).pack(fill=tk.X, padx=8, pady=(0, 4))
-
-        ttk.Label(box_ldac, foreground=theme.color("muted"), wraplength=430, justify=tk.LEFT,
-                  text="说明：LDAC 需要先在官方 FIIL+ App 里完成激活（激活码由 FIIL 服务器下发，"
-                       "PC 端离线无法代办），激活后本程序即可直接开关。开启时会自动先关闭低延迟"
-                       "（两者互斥），耳机可能短暂重连。").pack(fill=tk.X, padx=8, pady=(0, 8))
-
-        # ---- ⑦ 原始 Hex 控制台入口 ----
-        box_raw = ttk.LabelFrame(parent, text="⑦ 原始 Hex（直接手写字节发到耳机）")
-        box_raw.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("text"),
-                  text="这就是 FIIL 耳机真正认的协议帧本身：一串十六进制字节，"
-                       "按空格分开。上面所有按钮（降噪、影院、畅连…）最终都是拼出这样一串字节、"
-                       "写到 ff17 特征值。这里给你直接手写的机会 —— 用来试我还没逆向出来的命令。"
-                  ).pack(anchor=tk.W, padx=8, pady=(8, 2))
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=440, foreground=theme.color("muted"), font=(theme.FONT_MONO, 9),
-                  text="帧结构：[seq] [cid] [type] [reserved] [lenField] [cmdId] [payloadLen] [payload…]"
-                  ).pack(anchor=tk.W, padx=8, pady=(0, 2))
-        ttk.Label(box_raw, justify=tk.LEFT, wraplength=430, foreground=theme.color("idle"),
-                  text="例：00 27 01 00 02 01 00 = 「查电量」—— seq=00 cid=0x27(查询) type=01(请求) "
-                       "lenField=02 cmdId=01(电量) payloadLen=00（无参数）"
-                  ).pack(anchor=tk.W, padx=8, pady=(0, 4))
-
-        ttk.Label(box_raw, text="Hex（空格分隔）：").pack(anchor=tk.W, padx=8, pady=(4, 2))
-        self.ent_hex = ttk.Entry(box_raw, font=(theme.FONT_MONO, 10))
-        self.ent_hex.pack(fill=tk.X, padx=8)
-        self.ent_hex.insert(0, "00 27 01 00 02 01 00")
-
-        raw_btns = ttk.Frame(box_raw)
-        raw_btns.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Button(raw_btns, text="发送到 ff17", command=self._on_send_hex).pack(side=tk.LEFT)
-        ttk.Button(raw_btns, text="填入 GET_BATTERY", width=18,
-                   command=lambda: self._fill_hex("00 27 01 00 02 01 00")).pack(side=tk.LEFT, padx=4)
-        ttk.Button(raw_btns, text="填入 GET_MAF", width=14,
-                   command=lambda: self._fill_hex("00 27 01 00 02 0C 00")).pack(side=tk.LEFT)
-
-        ttk.Label(box_raw, text="常见命令（点击填入）：", foreground=theme.color("muted")).pack(
-            anchor=tk.W, padx=8, pady=(6, 0))
-        presets = [
-            ("setUnlock", "00 27 01 00 04 FF 02 02 34"),
-            ("GET_VERSION", "00 27 01 00 02 02 00"),
-            ("GET_EQ", "00 27 01 00 02 04 00"),
-            ("SET_MAF=1", "00 2C 01 00 01 01"),
-            ("SET_CI=1", "00 32 01 00 01 01"),
-        ]
-        # 分两行放：5 个按钮挤一行时自然宽度 480px，超过左栏 470px 会把整个面板
-        # 撑宽并顶出横向裁切（v1.2.0 的实测缺陷）。3+2 分行后每行都留有余量。
-        for row_presets in (presets[:3], presets[3:]):
-            quick = ttk.Frame(box_raw)
-            quick.pack(fill=tk.X, padx=8, pady=2)
-            for label, hx in row_presets:
-                ttk.Button(quick, text=label, width=12,
-                           command=lambda h=hx: self._fill_hex(h)).pack(side=tk.LEFT, padx=1)
-
-        # ---- 静默监听 ----
-        box_listen = ttk.LabelFrame(parent, text="⑧ 静默监听（逆向取证）")
-        box_listen.pack(fill=tk.X, pady=(6, 0))
-        lrow = ttk.Frame(box_listen)
-        lrow.pack(fill=tk.X, padx=8, pady=6)
-
-        self.listen_secs = tk.StringVar(value="60")
-        ttk.Label(lrow, text="时长(秒)：").pack(side=tk.LEFT)
-        ttk.Spinbox(lrow, from_=10, to=300, width=6, textvariable=self.listen_secs).pack(side=tk.LEFT)
-        ttk.Button(lrow, text="开始监听", command=self._on_listen).pack(side=tk.LEFT, padx=6)
-        ttk.Button(lrow, text="停止", command=lambda: self.worker.submit(Command("stop_listen"))).pack(side=tk.LEFT)
+        self._readback(trow, self.tone_var)
 
     def _build_right(self, parent: ttk.Frame) -> None:
         """右侧：状态总览卡片。
@@ -445,53 +460,151 @@ class App:
         v1.2.0 把原来的「收发日志 / 解析结果」两个标签页整个搬进了设置窗口的
         「日志」页 —— 主窗口右侧改成一眼能看完的状态总览，不用再切标签。
         """
-        box = ttk.LabelFrame(parent, text="⑨ 状态总览")
+        box = tk.Frame(parent, bg=theme.color("card"),
+                       highlightthickness=1, highlightbackground=theme.color("border_soft"))
         box.pack(fill=tk.BOTH, expand=True)
 
-        head = ttk.Frame(box)
-        head.pack(fill=tk.X, padx=10, pady=(8, 4))
-        ttk.Label(head, text="当前耳机状态（连接后自动读取，也可点右侧刷新）",
-                  foreground=theme.color("muted")).pack(side=tk.LEFT)
-        ttk.Button(head, text="刷新全部", command=self._on_refresh_all,
-                   width=10).pack(side=tk.RIGHT)
+        head = tk.Frame(box, bg=theme.color("card"))
+        head.pack(fill=tk.X, padx=theme.SPACE["lg"], pady=(theme.SPACE["md"], theme.SPACE["sm"]))
+        tk.Label(head, text="状态总览", bg=theme.color("card"), fg=theme.color("text"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_TITLE, "bold")).pack(side=tk.LEFT)
+        tk.Label(head, text="连接后自动读取", bg=theme.color("card"),
+                 fg=theme.color("faint"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(
+            side=tk.LEFT, padx=(theme.SPACE["sm"], 0))
+        ttk.Button(head, text="刷新", command=self._on_refresh_all, width=6).pack(side=tk.RIGHT)
 
         # 卡片容器：3 列网格，随窗口宽度自适应
-        grid = ttk.Frame(box)
-        grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        grid = tk.Frame(box, bg=theme.color("card"))
+        grid.pack(fill=tk.X, padx=theme.SPACE["md"], pady=0)
         for col in range(3):
             grid.columnconfigure(col, weight=1, uniform="card")
 
         self.overview_cards: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
+        #: 每张卡片左侧的语义色条（随 tone 变色）
+        self.overview_stripes: dict[str, tk.Frame] = {}
+        #: 卡片内容区（随 tone 换淡色底）
+        self.overview_inner: dict[str, tk.Frame] = {}
         self._overview_grid = grid
 
+        # 原始 Hex 放在右栏：左侧 6 张卡片已经填满左栏高度，而右栏在 3 行总览卡片
+        # 下面空着一大片。把「手写字节」这种宽表格性质的输入搬到右侧，既利用了空白，
+        # 也让右侧从「只读总览」变成「总览 + 高级工具」，两栏高度也平衡了。
+        self._build_hex_panel(box)
+
         # 兜底提示：日志搬去设置页之后，用户找不到日志时这里要指路
-        tip = tk.Frame(box, bg=theme.color("chip_bg"))
-        tip.pack(fill=tk.X, padx=10, pady=(6, 10))
+        tip = tk.Frame(box, bg=theme.color("card_alt"))
+        tip.pack(fill=tk.X, padx=theme.SPACE["md"], pady=(theme.SPACE["sm"], theme.SPACE["md"]))
         tk.Label(
-            tip, bg=theme.color("chip_bg"), fg=theme.color("muted"),
-            font=(theme.FONT_UI, 9), justify=tk.LEFT, anchor=tk.W,
-            text="收发日志（原始字节）与解析结果已移到「⚙ 设置 → 日志」页，"
-                 "关掉主窗口后仍会继续记录。",
-        ).pack(fill=tk.X, padx=10, pady=8)
+            tip, bg=theme.color("card_alt"), fg=theme.color("faint"),
+            font=(theme.FONT_UI, theme.FONT_SIZE_SMALL), justify=tk.LEFT, anchor=tk.W,
+            text="收发日志（原始字节）与解析结果在「⚙ 设置 → 日志」页，关掉主窗口仍继续记录。",
+        ).pack(fill=tk.X, padx=theme.SPACE["sm"], pady=theme.SPACE["xs"])
+
+    def _build_hex_panel(self, parent: Any) -> None:
+        """右栏的高级工具区：手写字节 + 静默监听。
+
+        这两个功能都属于逆向取证（发原始命令 / 被动收原始字节），合成一张卡片，
+        与左栏的「日常使用」开关区分开。
+        """
+        wrap = 640  # 右栏比左栏宽得多，脚注按右栏宽度折行
+        card = tk.Frame(parent, bg=theme.color("card"),
+                        highlightthickness=1, highlightbackground=theme.color("border_soft"))
+        card.pack(fill=tk.X, padx=theme.SPACE["md"], pady=(theme.SPACE["sm"], 0))
+
+        inner = tk.Frame(card, bg=theme.color("card"))
+        inner.pack(fill=tk.X, padx=theme.PANEL_PADX, pady=theme.PANEL_PADY)
+
+        head = tk.Frame(inner, bg=theme.color("card"))
+        head.pack(fill=tk.X, pady=(0, theme.SPACE["sm"]))
+        tk.Label(head, text="原始 Hex", bg=theme.color("card"), fg=theme.color("text"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_TITLE, "bold")).pack(side=tk.LEFT)
+        tk.Label(head, text="手写字节直接发到耳机 ff17 特征值", bg=theme.color("card"),
+                 fg=theme.color("faint"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(
+            side=tk.LEFT, padx=(theme.SPACE["sm"], 0))
+
+        erow = tk.Frame(inner, bg=theme.color("card"))
+        erow.pack(fill=tk.X, pady=(theme.SPACE["xs"], 0))
+        self.ent_hex = ttk.Entry(erow, font=(theme.FONT_MONO, theme.FONT_SIZE_BASE))
+        self.ent_hex.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.ent_hex.insert(0, "00 27 01 00 02 01 00")
+        ttk.Button(erow, text="发送", width=6, command=self._on_send_hex).pack(
+            side=tk.LEFT, padx=(theme.SPACE["sm"], 0))
+
+        # 预设一行放得下 5 个：右栏有 700+ px，不像左栏 430px 那样必须拆两行
+        quick = tk.Frame(inner, bg=theme.color("card"))
+        quick.pack(fill=tk.X, pady=(theme.SPACE["sm"], 0))
+        presets = [
+            ("setUnlock", "00 27 01 00 04 FF 02 02 34"),
+            ("GET_VERSION", "00 27 01 00 02 02 00"),
+            ("GET_EQ", "00 27 01 00 02 04 00"),
+            ("SET_MAF=1", "00 2C 01 00 01 01"),
+            ("SET_CI=1", "00 32 01 00 01 01"),
+        ]
+        for label, hx in presets:
+            ttk.Button(quick, text=label, width=12,
+                       command=lambda h=hx: self._fill_hex(h)).pack(
+                side=tk.LEFT, padx=(0, theme.SPACE["xs"]))
+
+        self._note(inner, "帧结构 [seq][cid][type][rsv][lenF][cmdId][plen][payload…]；"
+                          "上面所有按钮最终都是拼出这样一串字节。", "faint", wrap=wrap)
+
+        sep = tk.Frame(inner, bg=theme.color("border_soft"), height=1)
+        sep.pack(fill=tk.X, pady=(theme.SPACE["md"], theme.SPACE["sm"]))
+
+        lrow = tk.Frame(inner, bg=theme.color("card"))
+        lrow.pack(fill=tk.X)
+        self.listen_secs = tk.StringVar(value="60")
+        tk.Label(lrow, text="静默监听", bg=theme.color("card"), fg=theme.color("muted"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(
+            side=tk.LEFT, padx=(0, theme.SPACE["sm"]))
+        ttk.Spinbox(lrow, from_=10, to=300, width=5,
+                    textvariable=self.listen_secs).pack(side=tk.LEFT)
+        tk.Label(lrow, text="秒，只收不发，用于抓取耳机主动上报", bg=theme.color("card"),
+                 fg=theme.color("muted"),
+                 font=(theme.FONT_UI, theme.FONT_SIZE_SMALL)).pack(
+            side=tk.LEFT, padx=(theme.SPACE["xs"], theme.SPACE["md"]))
+        ttk.Button(lrow, text="开始", width=6, command=self._on_listen).pack(
+            side=tk.LEFT, padx=(0, theme.SPACE["xs"]))
+        ttk.Button(lrow, text="停止", width=6,
+                   command=lambda: self.worker.submit(Command("stop_listen"))).pack(
+            side=tk.LEFT)
 
     def _make_card(self, key: str, label: str, row: int, col: int) -> None:
+        """建一张总览卡片：左侧色条 + 淡色底 + 小标签 + 大数值。
+
+        底色不只是装饰，它是「一眼扫完状态」的关键：tone 决定这条竖条和数值的
+        颜色，未连接时整张卡片退成灰白，连上后各自亮起来 —— 七张卡片并排时，
+        扫一眼颜色就知道哪项正常、哪项要留意，比读七个文字快得多。
+        """
         card = tk.Frame(self._overview_grid, bg=theme.color("card"),
-                        highlightbackground=theme.color("border"), highlightthickness=1)
-        card.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+                        highlightthickness=1, highlightbackground=theme.color("border_soft"))
+        card.grid(row=row, column=col, sticky="nsew",
+                  padx=theme.SPACE["xs"], pady=theme.SPACE["xs"])
         # 设置里关掉总览时，后建的卡片也要立刻隐藏，不能等下次应用设置
         if not self.settings.show_status_overview:
             card.grid_remove()
 
-        lbl = tk.Label(card, text=label, bg=theme.color("card"),
-                       fg=theme.color("muted"), font=(theme.FONT_UI, 9), anchor=tk.W)
-        lbl.pack(fill=tk.X, padx=12, pady=(10, 0))
+        # 左侧 3px 语义色条：与左栏卡片的色条同一套语言
+        stripe = tk.Frame(card, bg=theme.color("border_soft"), width=3)
+        stripe.pack(side=tk.LEFT, fill=tk.Y)
 
-        val = tk.Label(card, text="--", bg=theme.color("card"),
-                       fg=theme.color("idle"), font=(theme.FONT_UI, 18, "bold"),
-                       anchor=tk.W)
-        val.pack(fill=tk.X, padx=12, pady=(0, 10))
+        inner = tk.Frame(card, bg=theme.color("card"))
+        inner.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        lbl = tk.Label(inner, text=label, bg=theme.color("card"),
+                       fg=theme.color("muted"),
+                       font=(theme.FONT_UI, theme.FONT_SIZE_SMALL), anchor=tk.W)
+        lbl.pack(fill=tk.X, padx=theme.CARD_PADX, pady=(theme.CARD_PADY, 0))
+
+        val = tk.Label(inner, text="--", bg=theme.color("card"),
+                       fg=theme.color("idle"), font=theme.value_font(), anchor=tk.W)
+        val.pack(fill=tk.X, padx=theme.CARD_PADX, pady=(0, theme.CARD_PADY))
 
         self.overview_cards[key] = (card, lbl, val)
+        self.overview_stripes[key] = stripe
+        self.overview_inner[key] = inner
 
     def _refresh_overview(self) -> None:
         """按当前已知状态重画总览。未知项一律 --，绝不用默认值冒充读数。"""
@@ -512,6 +625,27 @@ class App:
             _card, lbl, val = self.overview_cards[item.key]
             lbl.configure(text=item.label)
             val.configure(text=item.value, fg=theme.tone_color(item.tone))
+            # 色条与底色跟着 tone 走：连上且正常时是彩色，未读取时退成灰白。
+            # 这样七张卡片不是七块一样的白板，而是一眼能分出的状态矩阵。
+            self._paint_card(item.key, item.tone)
+
+    def _paint_card(self, key: str, tone: str) -> None:
+        """按 tone 重染一张总览卡片的色条与底色。"""
+        stripe = self.overview_stripes.get(key)
+        inner = self.overview_inner.get(key)
+        if stripe is None or inner is None:
+            return
+        # 未知/关闭态不染色，保持中性白底，避免整屏花花绿绿
+        active = tone in ("ok", "warn", "error")
+        stripe.configure(bg=theme.color(tone) if active else theme.color("border_soft"))
+        # tone_soft 返回的是色值，不是色名，不能再过一次 theme.color()
+        soft = theme.tone_soft(tone) if active else theme.color("card")
+        inner.configure(bg=soft)
+        for child in inner.winfo_children():
+            try:
+                child.configure(bg=soft)
+            except tk.TclError:
+                pass
 
     # -------------------------------------------------------------- 事件泵
     def _pump(self) -> None:
@@ -700,7 +834,33 @@ class App:
             pass
         self.lifecycle.exit()
 
+    def _draw_battery_bar(self, slot: str, percent: int | None) -> None:
+        """把电量百分比画成一条细进度条。低于 20% 转红，20~40% 转橙。
+
+        颜色分档不是装饰：电量是这张卡里唯一会随时间恶化的读数，用颜色区分
+        「正常 / 该充电了 / 快没电」比只给数字更快被注意到。
+        """
+        bar = self.bat_bars.get(slot)
+        if bar is None:
+            return
+        bar.delete("all")
+        if percent is None:
+            return
+        pct = max(0, min(100, int(percent)))
+        width = bar.winfo_width()
+        if width <= 1:
+            # 首次 set 时控件还没 geometry 完，用自然宽度占位，回调里会再画一次
+            width = 120
+        if pct >= 40:
+            fill = theme.color("ok")
+        elif pct >= 20:
+            fill = theme.color("warn")
+        else:
+            fill = theme.color("error")
+        bar.create_rectangle(0, 0, int(width * pct / 100), 4, fill=fill, width=0)
+
     def _handle_event(self, e: Event) -> None:
+        """把后台线程发来的事件翻译成界面状态。"""
         if e.kind == "log":
             self._append("sys", e.clock, e.text)
             # 连上后读到真实型号（GET_DEVICE_NAME）时，把扫描列表那一项就地改名，
@@ -719,11 +879,12 @@ class App:
         elif e.kind == "conn":
             self.connected = bool((e.payload or {}).get("connected"))
             switching = "切换中" in (e.text or "")
-            self.lbl_state.configure(
-                text=e.text,
-                foreground=("#8a5a00" if switching
-                            else "#2c7a2c" if self.connected else "#c0392b"),
-            )
+            tone = "warn" if switching else ("ok" if self.connected else "error")
+            # 状态胶囊是「色块 + 白字」的样式：底色跟着连接态走（切换中橙、
+            # 已连接绿、掉线红），而不是只改文字颜色 —— 只改字色时底色永远是灰的，
+            # 远看还是一坨灰块，这正是「素」的一部分。
+            self.lbl_state.configure(text=e.text, bg=theme.color(tone),
+                                     fg=theme.color("header_text"))
             if not self.connected and not switching:
                 # 真正的掉线才清空读数；畅连主从互换是预期行为，界面保留旧值避免闪烁
                 self.battery_state = None
@@ -778,9 +939,11 @@ class App:
                 # 不能摊成「左 -- / 右 xx% / 盒 --」，那是三耳机型的语义。
                 self.bat_labels["left"].configure(text="耳机电量")
                 self.bat_vars["left"].set(f"{b.single}%")
+                self._draw_battery_bar("left", b.single)
                 for key in ("right", "case"):
                     self.bat_labels[key].configure(text="")
                     self.bat_vars[key].set("")
+                    self._draw_battery_bar(key, None)
             else:
                 self.bat_labels["left"].configure(text="左耳")
                 self.bat_labels["right"].configure(text="右耳")
@@ -788,6 +951,9 @@ class App:
                 self.bat_vars["left"].set("--" if b.left is None else f"{b.left}%")
                 self.bat_vars["right"].set("--" if b.right is None else f"{b.right}%")
                 self.bat_vars["case"].set("--" if b.case is None else f"{b.case}%")
+                self._draw_battery_bar("left", b.left)
+                self._draw_battery_bar("right", b.right)
+                self._draw_battery_bar("case", b.case)
             self._parse_line(f"电量  {e.text}")
         elif e.kind == "maf":
             payload = e.payload or {}

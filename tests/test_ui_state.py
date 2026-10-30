@@ -51,3 +51,17 @@ def test_wrong_types_fall_back(tmp_path):
 
 def test_geometry_string_is_valid_for_tk():
     assert us.WindowSize(1280, 820).geometry() == "1280x820"
+
+
+def test_default_size_is_compact_enough_for_small_screens():
+    # v1.4.0：默认窗口必须能在 1366x768 这类小屏笔记本上完整显示
+    # （768 减去任务栏约 40px，可用高度不足 730）
+    width, height = us.DEFAULT_SIZE
+    assert width <= 1200, f"默认宽度 {width} 偏大"
+    assert height <= 730, f"默认高度 {height} 超出 1366x768 屏可用高度"
+    assert width >= 1000 and height >= 700, "也不能压到放不下内容"
+
+
+def test_min_size_allows_shrinking_below_default():
+    assert us.MIN_SIZE[0] < us.DEFAULT_SIZE[0]
+    assert us.MIN_SIZE[1] < us.DEFAULT_SIZE[1]
